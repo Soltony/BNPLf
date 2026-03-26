@@ -27,6 +27,10 @@ model User {
   sessions                    Session[]
   loanProviderId              String?
   loanProvider                LoanProvider?         @relation(fields: [loanProviderId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  branchId                    String?
+  branch                      Branch?               @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  merchantId                  String?
+  merchant                    Merchant?             @relation(fields: [merchantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   createdChanges              PendingChange[]       @relation("CreatedBy")
   approvedChanges             PendingChange[]       @relation("ApprovedBy")
   updatedDisbursementControls DisbursementControl[] @relation("DisbursementControlUpdatedBy")
@@ -262,6 +266,7 @@ model Borrower {
   pendingPayments         PendingPayment[]
   accountStatements       AccountStatement[]
   accountStatementMetrics AccountStatementMetrics[]
+  orders                  Order[]
 }
 
 // --------------------------------------
@@ -278,6 +283,7 @@ model LoanApplication {
   status            String             @default("PENDING_DOCUMENTS") // PENDING_DOCUMENTS, PENDING_REVIEW, NEEDS_REVISION, APPROVED, DISBURSED
   rejectionReason   String?            @db.Text
   loan              Loan?
+  order             Order?
   uploadedDocuments UploadedDocument[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
@@ -720,4 +726,238 @@ model SmsCampaign {
   @@index([status])
   @@index([scheduledAt])
   @@index([createdAt])
+}
+
+// --------------------------------------
+// BNPL / COMMERCE
+// --------------------------------------
+
+model District {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  status    String   @default("ACTIVE")
+  branches  Branch[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Branch {
+  id             String          @id @default(cuid())
+  name           String
+  districtId     String
+  district       District        @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  status         String          @default("ACTIVE")
+  stockLocations StockLocation[]
+  users          User[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([name, districtId])
+}
+
+model Merchant {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  status    String   @default("PENDING_APPROVAL")
+  items     Item[]
+  orders    Order[]
+  users     User[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ProductCategory {
+  id            String         @id @default(cuid())
+  name          String         @unique
+  status        String         @default("ACTIVE")
+  items         Item[]
+  discountRules DiscountRule[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Item {
+  id              String           @id @default(cuid())
+  merchantId      String
+  merchant        Merchant         @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  categoryId      String
+  category        ProductCategory  @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  name            String
+  description     String?          @db.Text
+  price           Float
+  imageUrl        String?          @db.Text
+  videoUrl        String?          @db.Text
+  currency        String           @default("ETB")
+  status          String           @default("ACTIVE")
+  stockQuantity   Int              @default(0)
+  variants        ItemVariant[]
+  optionGroups    ItemOptionGroup[]
+  discountRules   DiscountRule[]
+  orderItems                 OrderItem[]
+  inventoryLevels            InventoryLevel[]
+  combinationInventoryLevels CombinationInventoryLevel[]
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+}
+
+model ItemVariant {
+  id         String      @id @default(cuid())
+  itemId     String
+  item       Item        @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  name       String
+  size       String?
+  color      String?
+  material   String?
+  price      Float
+  status     String      @default("ACTIVE")
+  orderItems OrderItem[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  @@index([itemId])
+}
+
+model ItemOptionGroup {
+  id        String            @id @default(cuid())
+  itemId    String
+  item      Item              @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  name      String
+  values    ItemOptionValue[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([itemId])
+}
+
+model ItemOptionValue {
+  id         String                      @id @default(cuid())
+  groupId    String
+  group      ItemOptionGroup             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  label      String
+  priceDelta Float                       @default(0)
+  selections OrderItemOptionSelection[]
+  createdAt  DateTime                    @default(now())
+  updatedAt  DateTime                    @updatedAt
+
+  @@index([groupId])
+}
+
+model DiscountRule {
+  id         String           @id @default(cuid())
+  name       String
+  type       String // PERCENT, FIXED, BUY_X_GET_Y
+  value      Float            @default(0)
+  buyX       Int?
+  getY       Int?
+  itemId     String?
+  item       Item?            @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  categoryId String?
+  category   ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  minQuantity Int             @default(1)
+  startDate  DateTime?
+  endDate    DateTime?
+  status     String           @default("ACTIVE")
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
+
+  @@index([itemId])
+  @@index([categoryId])
+  @@index([startDate, endDate])
+}
+
+model Order {
+  id                String           @id @default(cuid())
+  borrowerId        String
+  borrower          Borrower         @relation(fields: [borrowerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  merchantId        String
+  merchant          Merchant         @relation(fields: [merchantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loanApplicationId String?          @unique
+  loanApplication   LoanApplication? @relation(fields: [loanApplicationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  loanId            String?
+  status            String           @default("PENDING_MERCHANT_CONFIRMATION")
+  cancelReason      String?
+  cancelledBy       String?
+  totalAmount       Float            @default(0)
+  currency          String           @default("ETB")
+  orderItems        OrderItem[]
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([borrowerId])
+  @@index([merchantId])
+  @@index([status])
+}
+
+model OrderItem {
+  id               String                      @id @default(cuid())
+  orderId          String
+  order            Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  itemId           String
+  item             Item                        @relation(fields: [itemId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  variantId        String?
+  variant          ItemVariant?                @relation(fields: [variantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  quantity         Int                         @default(1)
+  unitPrice        Float
+  lineTotal        Float
+  optionSelections OrderItemOptionSelection[]
+  createdAt        DateTime                    @default(now())
+
+  @@index([orderId])
+  @@index([itemId])
+}
+
+model OrderItemOptionSelection {
+  id            String          @id @default(cuid())
+  orderItemId   String
+  orderItem     OrderItem       @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  optionValueId String
+  optionValue   ItemOptionValue @relation(fields: [optionValueId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  priceDelta    Float           @default(0)
+
+  @@index([orderItemId])
+}
+
+model StockLocation {
+  id                        String                     @id @default(cuid())
+  name                      String
+  address                   String?
+  contactInfo               String?
+  branchId                  String?
+  branch                    Branch?                    @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  status                    String                     @default("ACTIVE")
+  inventoryLevels           InventoryLevel[]
+  combinationInventoryLevels CombinationInventoryLevel[]
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+}
+
+model InventoryLevel {
+  id              String        @id @default(cuid())
+  itemId          String
+  item            Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  stockLocationId String
+  stockLocation   StockLocation @relation(fields: [stockLocationId], references: [id], onDelete: Cascade)
+  quantity        Int           @default(0)
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([itemId, stockLocationId])
+}
+
+model CombinationInventoryLevel {
+  id                String        @id @default(cuid())
+  itemId            String
+  item              Item          @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  locationId        String
+  location          StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  combinationKey    String
+  optionValueIds    String        @db.NVarChar(Max)
+  quantityAvailable Int           @default(0)
+  reservedQuantity  Int           @default(0)
+  lowStockThreshold Int?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@unique([itemId, locationId, combinationKey])
+  @@index([itemId])
+  @@index([locationId])
 }

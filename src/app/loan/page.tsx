@@ -1,5 +1,7 @@
 
 import { DashboardClient } from '@/components/dashboard/dashboard-client';
+import { ShopBrowse } from '@/components/shop/shop-browse';
+import { ShopItemDetail } from '@/components/shop/shop-item-detail';
 import type { LoanDetails, LoanProvider, FeeRule, PenaltyRule, Tax } from '@/lib/types';
 import { Suspense } from 'react';
 import { Loader2 } from 'lucide-react';
@@ -192,8 +194,47 @@ export default async function LoanPage({ searchParams }: { searchParams: any }) 
     }
 
     const borrowerId = String(ctx.borrowerId);
-    
-    // Get the asOfDate for all calculations - this allows testing by changing ASOF_DATE env var
+    const itemId = params?.itemId as string | undefined;
+    const step = params?.step as string | undefined;
+    const view = params?.view as string | undefined;
+
+    // Check if borrower has any active (unpaid) loans — if so, default to
+    // the dashboard so they can see their outstanding balance / repay.
+    // The user can still navigate to the shop via the "Shop BNPL" link (view=shop).
+    const hasActiveLoan = await prisma.loan.count({
+        where: { borrowerId, repaymentStatus: 'Unpaid' },
+    }) > 0;
+
+    const forceShop = view === 'shop';
+    const showDashboard = (hasActiveLoan && !forceShop && !itemId) || step === 'products';
+
+    // ── Step 1: No active loan (or explicitly browsing shop) → Shop Browse ──
+    if (!itemId && !showDashboard) {
+        return (
+            <Suspense fallback={
+                <div className="flex flex-col min-h-screen bg-background items-center justify-center">
+                    <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                </div>
+            }>
+                <ShopBrowse />
+            </Suspense>
+        );
+    }
+
+    // ── Step 2: Item selected but not yet choosing loan → Item Detail ──
+    if (!showDashboard && itemId) {
+        return (
+            <Suspense fallback={
+                <div className="flex flex-col min-h-screen bg-background items-center justify-center">
+                    <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                </div>
+            }>
+                <ShopItemDetail />
+            </Suspense>
+        );
+    }
+
+    // ── Step 3: Active loan or chose loan product → Dashboard ──
     const asOfDate = getAsOfDate();
     
     const [providers, loanHistory, taxConfigs] = await Promise.all([

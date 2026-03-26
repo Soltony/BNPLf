@@ -22,11 +22,29 @@ export type MiniAppAuthContext = {
 };
 
 /**
+ * Whether the mini-app auth bypass is active (development only).
+ */
+export function isMiniAppBypassEnabled(): boolean {
+  return process.env.ALLOW_MINIAPP_BYPASS === 'true';
+}
+
+/**
  * Resolves the current mini-app identity.
  * - Requires presence of a super app token.
  * - Derives the borrower (phone) for least-privilege checks.
+ * - When ALLOW_MINIAPP_BYPASS=true, returns a dev context without a real session.
  */
 export async function requireMiniAppAuthContext(): Promise<MiniAppAuthContext> {
+  // --- Dev bypass: skip real session checks ---
+  if (isMiniAppBypassEnabled()) {
+    const devBorrowerId = process.env.DEV_BORROWER_ID || '251962206017';
+    return {
+      superAppToken: 'dev-bypass',
+      borrowerId: devBorrowerId,
+      sessionUserId: null,
+    };
+  }
+
   const session = await getSession({ allowRefresh: false });
   const rawToken = session?.superAppToken;
 
@@ -61,6 +79,9 @@ export async function requireMiniAppAuthContext(): Promise<MiniAppAuthContext> {
 }
 
 export function assertBorrowerMatches(requestedBorrowerId: string | null | undefined, ctx: MiniAppAuthContext) {
+  // Skip validation when running with dev bypass
+  if (isMiniAppBypassEnabled()) return;
+
   if (!requestedBorrowerId) {
     throw new MiniAppAuthError(400, 'borrowerId is required');
   }

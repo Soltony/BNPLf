@@ -31,6 +31,9 @@ function getAllowedRolesForPath(path: string): string[] | undefined {
     '/api/providers': '/admin/providers',
     '/api/users': '/admin/users',
     '/api/reports': '/admin/reports',
+    '/api/merchants': '/admin/merchants',
+    '/api/branches': '/admin/branch',
+    '/api/inventory': '/admin/merchants',
   };
 
   for (const prefix in apiPrefixToMenuPath) {
@@ -59,11 +62,12 @@ function withSecurityHeaders(res: NextResponse, csp: string, nonce: string) {
 
 const protectedAdminRoutes = [
   '/admin', '/api/admin', '/api/audit-logs', '/api/approvals', '/api/roles',
-  '/api/settings', '/api/providers', '/api/users', '/api/reports'
+  '/api/settings', '/api/providers', '/api/users', '/api/reports',
+  '/api/merchants', '/api/branches', '/api/inventory'
 ];
 const publicRoutes = ['/admin/login', '/loan/connect', '/admin/change-password'];
 
-const protectedMiniAppRoutes = ['/loan', '/dashboard', '/history'];
+const protectedMiniAppRoutes = ['/loan', '/dashboard', '/history', '/shop', '/bnpl'];
 const publicMiniAppRoutes = ['/loan/connect'];
 
 export const config = {
@@ -91,6 +95,14 @@ export const config = {
     '/api/reports/:path*',
     '/api/reports',
 
+    // BNPL admin APIs
+    '/api/merchants',
+    '/api/merchants/:path*',
+    '/api/branches',
+    '/api/branches/:path*',
+    '/api/inventory',
+    '/api/inventory/:path*',
+
     // Mini-app pages and APIs that must not be accessible without a super-app token
     '/loan',
     '/loan/:path*',
@@ -98,6 +110,15 @@ export const config = {
     '/dashboard/:path*',
     '/history',
     '/history/:path*',
+
+    // BNPL shop and order pages + APIs
+    '/shop',
+    '/shop/:path*',
+    '/bnpl',
+    '/bnpl/:path*',
+    '/api/bnpl/:path*',
+    '/api/shop/:path*',
+
     '/api/loan-accounts',
     '/api/phone-accounts',
     '/api/phone-accounts/:path*',
@@ -164,7 +185,8 @@ export default async function middleware(req: NextRequest) {
   // MINI-APP ACCESS CONTROL (super-app token required)
   // ----------------------------------------
   const isMiniProtected = protectedMiniAppRoutes.some(prefix => path === prefix || path.startsWith(prefix + '/'));
-  if (isMiniProtected && !publicMiniAppRoutes.includes(path)) {
+  const miniAppBypass = process.env.ALLOW_MINIAPP_BYPASS === 'true';
+  if (isMiniProtected && !publicMiniAppRoutes.includes(path) && !miniAppBypass) {
     const ok = await hasSuperAppToken(req);
     if (!ok) {
       if (path.startsWith('/api/')) {

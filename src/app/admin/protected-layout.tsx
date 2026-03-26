@@ -133,7 +133,7 @@ export function ProtectedLayout({ children, providers }: ProtectedLayoutProps) {
     if (!currentUser || !currentUser.permissions) return false;
     const current = currentMenuItem;
     if (!current) return true; // allow non-admin menu routes (handled elsewhere)
-    const moduleName = current.label.toLowerCase().replace(/\s+/g, '-');
+    const moduleName = current.permissionKey || current.label.toLowerCase().replace(/\s+/g, '-');
     return !!currentUser.permissions[moduleName]?.read;
   }, [currentUser, currentMenuItem]);
 

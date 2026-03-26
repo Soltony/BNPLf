@@ -1,0 +1,289 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/hooks/use-toast';
+import { ChevronDown, ChevronUp, XCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+
+const statusColor: Record<string, string> = {
+  PENDING: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+  PENDING_MERCHANT_CONFIRMATION: 'bg-gray-100 text-gray-800 border-gray-300',
+  ON_DELIVERY: 'bg-amber-100 text-amber-800 border-amber-300',
+  CONFIRMED: 'bg-blue-100 text-blue-800 border-blue-300',
+  SHIPPED: 'bg-purple-100 text-purple-800 border-purple-300',
+  DELIVERED: 'bg-green-100 text-green-800 border-green-300',
+  CANCELLED: 'bg-red-100 text-red-800 border-red-300',
+};
+
+export default function BnplOrdersPage() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const borrowerId = searchParams?.get('borrowerId') || '';
+  const { toast } = useToast();
+  const [orders, setOrders] = useState<any[]>([]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+
+  const load = () => {
+    if (!borrowerId) return;
+    fetch(`/api/bnpl/orders?borrowerId=${encodeURIComponent(borrowerId)}`)
+      .then(r => r.json())
+      .then(data => setOrders(Array.isArray(data) ? data : []));
+  };
+
+  useEffect(() => { load(); }, [borrowerId]);
+
+  // Auto-expand first order
+  useEffect(() => {
+    if (orders.length > 0 && Object.keys(expanded).length === 0) {
+      setExpanded({ [orders[0].id]: true });
+    }
+  }, [orders]);
+
+  const toggle = (id: string) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
+
+  const fmtDate = (d: string) => new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  const fmtCurr = (v: number) => new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v);
+
+  const confirmDelivered = async (orderId: string) => {
+    setConfirming(orderId);
+    try {
+      const res = await fetch('/api/bnpl/orders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: orderId, status: 'DELIVERED' }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to confirm delivery');
+      }
+      toast({ title: 'Delivery confirmed', description: 'Your order has been marked as delivered and the loan has been disbursed.' });
+      load();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setConfirming(null);
+    }
+  };
+
+  const openCancelDialog = (orderId: string) => {
+    setCancelOrderId(orderId);
+    setCancelReason('');
+    setCancelDialogOpen(true);
+  };
+
+  const cancelOrder = async () => {
+    if (!cancelOrderId) return;
+    setCancelling(true);
+    try {
+      const res = await fetch('/api/bnpl/orders', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: cancelOrderId, status: 'CANCELLED', cancelReason: cancelReason || 'Cancelled by borrower' }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to cancel order');
+      }
+      toast({ title: 'Order cancelled', description: 'Your order has been cancelled successfully.' });
+      setCancelDialogOpen(false);
+      load();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  // Get first item for summary display
+  const getFirstItem = (o: any) => {
+    const first = o.orderItems?.[0];
+    return first ? { name: first.item?.name || 'Item', imageUrl: first.item?.imageUrl } : { name: 'Order', imageUrl: null };
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-2xl mx-auto px-4 py-8">
+        <div className="mb-6">
+          <div className="flex items-center gap-3 mb-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => router.back()}
+              className="p-2"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+            <h1 className="text-3xl font-bold">My Orders</h1>
+          </div>
+          <p className="text-muted-foreground ml-12">Track BNPL order status and confirm delivery.</p>
+        </div>
+
+        <Card className="mb-6">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-xl">Orders</CardTitle>
+            <p className="text-sm text-muted-foreground">Borrower: {borrowerId}</p>
+          </CardHeader>
+        </Card>
+
+        {orders.length === 0 && (
+          <Card>
+            <CardContent className="py-12 text-center text-muted-foreground">
+              No orders yet.
+            </CardContent>
+          </Card>
+        )}
+
+        <div className="space-y-4">
+          {orders.map(o => {
+            const isOpen = expanded[o.id] || false;
+            const firstItem = getFirstItem(o);
+            return (
+              <Card key={o.id} className="overflow-hidden">
+                {/* Summary header - always visible */}
+                <button
+                  onClick={() => toggle(o.id)}
+                  className="w-full flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors text-left"
+                >
+                  {firstItem.imageUrl && (
+                    <img
+                      src={firstItem.imageUrl}
+                      alt={firstItem.name}
+                      className="w-12 h-12 rounded-lg object-cover border"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold truncate">{firstItem.name}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold whitespace-nowrap">{fmtCurr(o.totalAmount)} ETB</span>
+                    {isOpen ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
+                  </div>
+                </button>
+
+                {/* Expanded details */}
+                {isOpen && (
+                  <div className="border-t px-4 pb-4">
+                    <div className="pt-4 space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Status</span>
+                        <Badge className={statusColor[o.status] || ''} variant="outline">{o.status}</Badge>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Order ID</span>
+                        <span className="font-mono text-xs">{o.id}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Date</span>
+                        <span>{fmtDate(o.createdAt)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Merchant</span>
+                        <span>{o.merchant?.name}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Items</span>
+                        <span>
+                          {o.orderItems?.map((it: any) => (
+                            <span key={it.id}>{it.quantity}&times; {it.item?.name}</span>
+                          ))}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Cancelled by merchant - show reason */}
+                    {o.status === 'CANCELLED' && o.cancelReason && (
+                      <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3">
+                        <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-sm font-medium text-red-700">Order Cancelled</p>
+                          <p className="text-xs text-red-600 mt-0.5">
+                            {o.cancelledBy === 'MERCHANT' ? 'Reason from merchant: ' : 'Reason: '}
+                            {o.cancelReason}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Confirm delivered button - only for ON_DELIVERY orders */}
+                    {o.status === 'ON_DELIVERY' && (
+                      <div className="mt-4 flex gap-2 justify-center">
+                        <Button
+                          onClick={() => confirmDelivered(o.id)}
+                          disabled={confirming === o.id}
+                          variant="outline"
+                          className="px-6"
+                        >
+                          {confirming === o.id ? 'Confirming...' : 'Confirm delivered'}
+                        </Button>
+                      </div>
+                    )}
+
+                    {/* Cancel button - for non-delivered, non-cancelled orders */}
+                    {o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && (
+                      <div className="mt-4 flex justify-center">
+                        <Button
+                          onClick={() => openCancelDialog(o.id)}
+                          variant="outline"
+                          className="px-6 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                        >
+                          <XCircle className="h-4 w-4 mr-1.5" />
+                          Cancel Order
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* Cancel confirmation dialog */}
+        <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Cancel Order</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to cancel this order? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Reason (optional)</label>
+              <Textarea
+                placeholder="Why are you cancelling this order?"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                rows={3}
+              />
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={cancelling}>
+                Keep Order
+              </Button>
+              <Button variant="destructive" onClick={cancelOrder} disabled={cancelling}>
+                {cancelling ? 'Cancelling...' : 'Cancel Order'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </div>
+  );
+}

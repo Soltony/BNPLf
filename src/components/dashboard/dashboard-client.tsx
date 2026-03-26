@@ -20,7 +20,7 @@ import type {
   Tax,
 } from "@/lib/types";
 import { IconDisplay } from "@/components/icons";
-import { ChevronRight, Loader2, Eye, EyeOff } from "lucide-react";
+import { ChevronRight, Loader2, Eye, EyeOff, ShoppingBag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ProductCard } from "@/components/loan/product-card";
 import { RepaymentDialog } from "@/components/loan/repayment-dialog";
@@ -342,6 +342,8 @@ export function DashboardClient({
     const params = new URLSearchParams(searchParams.toString());
     params.set("providerId", selectedProviderId);
     params.set("product", product.id);
+    // Remove the shop flow's "step" param so /apply defaults to "calculator"
+    params.delete("step");
 
     // Fetch fresh eligibility for this borrower + provider to ensure UI uses up-to-date limit
     let productLimit = eligibility.limits[product.id] ?? 0;
@@ -680,7 +682,14 @@ export function DashboardClient({
                 </Card>
               )}
 
-              <div className="flex justify-end mt-4">
+              <div className="flex justify-end mt-4 gap-3">
+                <Link
+                  href={`/loan?borrowerId=${searchParams.get('borrowerId') || ''}&view=shop`}
+                  className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors bg-primary/10 text-primary"
+                >
+                  <ShoppingBag className="h-4 w-4" />
+                  <span>Shop BNPL</span>
+                </Link>
                 <Link
                   href={`/history?${searchParams.toString()}`}
                   className="inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-semibold transition-colors"

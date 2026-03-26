@@ -32,6 +32,17 @@ const ENTITY_TO_MODULE: Record<string, string[]> = {
   smstemplate: ['sms-management'],
   smscampaign: ['sms-management'],
   smslog: ['sms-management'],
+  merchant: ['merchants', 'branch'],
+  merchants: ['merchants'],
+  productcategory: ['branch'],
+  item: ['merchants'],
+  itemvariant: ['merchants'],
+  discountrule: ['merchants'],
+  order: ['orders', 'merchants'],
+  stocklocation: ['branch'],
+  inventorylevel: ['merchants', 'branch'],
+  district: ['branch'],
+  branch: ['branch'],
 };
 
 export function entityTypeToPermissionKeys(entityType: string) {

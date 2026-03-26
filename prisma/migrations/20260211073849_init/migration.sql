@@ -13,6 +13,8 @@ CREATE TABLE [dbo].[User] (
     [status] NVARCHAR(1000) NOT NULL,
     [roleId] NVARCHAR(1000) NOT NULL,
     [loanProviderId] NVARCHAR(1000),
+    [branchId] NVARCHAR(1000),
+    [merchantId] NVARCHAR(1000),
     [createdAt] DATETIME2 NOT NULL CONSTRAINT [User_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
     [updatedAt] DATETIME2 NOT NULL,
     CONSTRAINT [User_pkey] PRIMARY KEY CLUSTERED ([id]),
@@ -581,6 +583,195 @@ CREATE TABLE [dbo].[SmsCampaign] (
     CONSTRAINT [SmsCampaign_pkey] PRIMARY KEY CLUSTERED ([id])
 );
 
+-- CreateTable
+CREATE TABLE [dbo].[District] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [District_status_df] DEFAULT 'ACTIVE',
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [District_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [District_pkey] PRIMARY KEY CLUSTERED ([id]),
+    CONSTRAINT [District_name_key] UNIQUE NONCLUSTERED ([name])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[Branch] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [districtId] NVARCHAR(1000) NOT NULL,
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [Branch_status_df] DEFAULT 'ACTIVE',
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [Branch_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [Branch_pkey] PRIMARY KEY CLUSTERED ([id]),
+    CONSTRAINT [Branch_name_districtId_key] UNIQUE NONCLUSTERED ([name],[districtId])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[Merchant] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [Merchant_status_df] DEFAULT 'PENDING_APPROVAL',
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [Merchant_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [Merchant_pkey] PRIMARY KEY CLUSTERED ([id]),
+    CONSTRAINT [Merchant_name_key] UNIQUE NONCLUSTERED ([name])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[ProductCategory] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [ProductCategory_status_df] DEFAULT 'ACTIVE',
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [ProductCategory_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [ProductCategory_pkey] PRIMARY KEY CLUSTERED ([id]),
+    CONSTRAINT [ProductCategory_name_key] UNIQUE NONCLUSTERED ([name])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[Item] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [merchantId] NVARCHAR(1000) NOT NULL,
+    [categoryId] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [description] TEXT,
+    [price] FLOAT(53) NOT NULL,
+    [imageUrl] TEXT,
+    [videoUrl] TEXT,
+    [currency] NVARCHAR(1000) NOT NULL CONSTRAINT [Item_currency_df] DEFAULT 'ETB',
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [Item_status_df] DEFAULT 'ACTIVE',
+    [stockQuantity] INT NOT NULL CONSTRAINT [Item_stockQuantity_df] DEFAULT 0,
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [Item_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [Item_pkey] PRIMARY KEY CLUSTERED ([id])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[ItemVariant] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [itemId] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [size] NVARCHAR(1000),
+    [color] NVARCHAR(1000),
+    [material] NVARCHAR(1000),
+    [price] FLOAT(53) NOT NULL,
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [ItemVariant_status_df] DEFAULT 'ACTIVE',
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [ItemVariant_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [ItemVariant_pkey] PRIMARY KEY CLUSTERED ([id])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[ItemOptionGroup] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [itemId] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [ItemOptionGroup_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [ItemOptionGroup_pkey] PRIMARY KEY CLUSTERED ([id])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[ItemOptionValue] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [groupId] NVARCHAR(1000) NOT NULL,
+    [label] NVARCHAR(1000) NOT NULL,
+    [priceDelta] FLOAT(53) NOT NULL CONSTRAINT [ItemOptionValue_priceDelta_df] DEFAULT 0,
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [ItemOptionValue_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [ItemOptionValue_pkey] PRIMARY KEY CLUSTERED ([id])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[DiscountRule] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [type] NVARCHAR(1000) NOT NULL,
+    [value] FLOAT(53) NOT NULL CONSTRAINT [DiscountRule_value_df] DEFAULT 0,
+    [buyX] INT,
+    [getY] INT,
+    [itemId] NVARCHAR(1000),
+    [categoryId] NVARCHAR(1000),
+    [minQuantity] INT NOT NULL CONSTRAINT [DiscountRule_minQuantity_df] DEFAULT 1,
+    [startDate] DATETIME2,
+    [endDate] DATETIME2,
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [DiscountRule_status_df] DEFAULT 'ACTIVE',
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [DiscountRule_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [DiscountRule_pkey] PRIMARY KEY CLUSTERED ([id])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[Order] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [borrowerId] NVARCHAR(1000) NOT NULL,
+    [merchantId] NVARCHAR(1000) NOT NULL,
+    [loanApplicationId] NVARCHAR(1000),
+    [loanId] NVARCHAR(1000),
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [Order_status_df] DEFAULT 'PENDING_MERCHANT_CONFIRMATION',
+    [totalAmount] FLOAT(53) NOT NULL CONSTRAINT [Order_totalAmount_df] DEFAULT 0,
+    [currency] NVARCHAR(1000) NOT NULL CONSTRAINT [Order_currency_df] DEFAULT 'ETB',
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [Order_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [Order_pkey] PRIMARY KEY CLUSTERED ([id]),
+    CONSTRAINT [Order_loanApplicationId_key] UNIQUE NONCLUSTERED ([loanApplicationId])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[OrderItem] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [orderId] NVARCHAR(1000) NOT NULL,
+    [itemId] NVARCHAR(1000) NOT NULL,
+    [variantId] NVARCHAR(1000),
+    [quantity] INT NOT NULL CONSTRAINT [OrderItem_quantity_df] DEFAULT 1,
+    [unitPrice] FLOAT(53) NOT NULL,
+    [lineTotal] FLOAT(53) NOT NULL,
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [OrderItem_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT [OrderItem_pkey] PRIMARY KEY CLUSTERED ([id])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[OrderItemOptionSelection] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [orderItemId] NVARCHAR(1000) NOT NULL,
+    [optionValueId] NVARCHAR(1000) NOT NULL,
+    [priceDelta] FLOAT(53) NOT NULL CONSTRAINT [OrderItemOptionSelection_priceDelta_df] DEFAULT 0,
+    CONSTRAINT [OrderItemOptionSelection_pkey] PRIMARY KEY CLUSTERED ([id])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[StockLocation] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [name] NVARCHAR(1000) NOT NULL,
+    [branchId] NVARCHAR(1000),
+    [status] NVARCHAR(1000) NOT NULL CONSTRAINT [StockLocation_status_df] DEFAULT 'ACTIVE',
+    [createdAt] DATETIME2 NOT NULL CONSTRAINT [StockLocation_createdAt_df] DEFAULT CURRENT_TIMESTAMP,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [StockLocation_pkey] PRIMARY KEY CLUSTERED ([id])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[InventoryLevel] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [itemId] NVARCHAR(1000) NOT NULL,
+    [stockLocationId] NVARCHAR(1000) NOT NULL,
+    [quantity] INT NOT NULL CONSTRAINT [InventoryLevel_quantity_df] DEFAULT 0,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [InventoryLevel_pkey] PRIMARY KEY CLUSTERED ([id]),
+    CONSTRAINT [InventoryLevel_itemId_stockLocationId_key] UNIQUE NONCLUSTERED ([itemId],[stockLocationId])
+);
+
+-- CreateTable
+CREATE TABLE [dbo].[CombinationInventoryLevel] (
+    [id] NVARCHAR(1000) NOT NULL,
+    [combinationKey] NVARCHAR(1000) NOT NULL,
+    [stockLocationId] NVARCHAR(1000) NOT NULL,
+    [quantity] INT NOT NULL CONSTRAINT [CombinationInventoryLevel_quantity_df] DEFAULT 0,
+    [updatedAt] DATETIME2 NOT NULL,
+    CONSTRAINT [CombinationInventoryLevel_pkey] PRIMARY KEY CLUSTERED ([id]),
+    CONSTRAINT [CombinationInventoryLevel_combinationKey_stockLocationId_key] UNIQUE NONCLUSTERED ([combinationKey],[stockLocationId])
+);
+
 -- CreateIndex
 CREATE NONCLUSTERED INDEX [Session_userId_idx] ON [dbo].[Session]([userId]);
 
@@ -668,11 +859,53 @@ CREATE NONCLUSTERED INDEX [SmsCampaign_scheduledAt_idx] ON [dbo].[SmsCampaign]([
 -- CreateIndex
 CREATE NONCLUSTERED INDEX [SmsCampaign_createdAt_idx] ON [dbo].[SmsCampaign]([createdAt]);
 
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [ItemVariant_itemId_idx] ON [dbo].[ItemVariant]([itemId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [ItemOptionGroup_itemId_idx] ON [dbo].[ItemOptionGroup]([itemId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [ItemOptionValue_groupId_idx] ON [dbo].[ItemOptionValue]([groupId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [DiscountRule_itemId_idx] ON [dbo].[DiscountRule]([itemId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [DiscountRule_categoryId_idx] ON [dbo].[DiscountRule]([categoryId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [DiscountRule_startDate_endDate_idx] ON [dbo].[DiscountRule]([startDate], [endDate]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [Order_borrowerId_idx] ON [dbo].[Order]([borrowerId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [Order_merchantId_idx] ON [dbo].[Order]([merchantId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [Order_status_idx] ON [dbo].[Order]([status]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [OrderItem_orderId_idx] ON [dbo].[OrderItem]([orderId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [OrderItem_itemId_idx] ON [dbo].[OrderItem]([itemId]);
+
+-- CreateIndex
+CREATE NONCLUSTERED INDEX [OrderItemOptionSelection_orderItemId_idx] ON [dbo].[OrderItemOptionSelection]([orderItemId]);
+
 -- AddForeignKey
 ALTER TABLE [dbo].[User] ADD CONSTRAINT [User_roleId_fkey] FOREIGN KEY ([roleId]) REFERENCES [dbo].[Role]([id]) ON DELETE NO ACTION ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE [dbo].[User] ADD CONSTRAINT [User_loanProviderId_fkey] FOREIGN KEY ([loanProviderId]) REFERENCES [dbo].[LoanProvider]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[User] ADD CONSTRAINT [User_branchId_fkey] FOREIGN KEY ([branchId]) REFERENCES [dbo].[Branch]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[User] ADD CONSTRAINT [User_merchantId_fkey] FOREIGN KEY ([merchantId]) REFERENCES [dbo].[Merchant]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE [dbo].[Session] ADD CONSTRAINT [Session_userId_fkey] FOREIGN KEY ([userId]) REFERENCES [dbo].[User]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
@@ -820,6 +1053,66 @@ ALTER TABLE [dbo].[SmsLog] ADD CONSTRAINT [SmsLog_campaignId_fkey] FOREIGN KEY (
 
 -- AddForeignKey
 ALTER TABLE [dbo].[SmsCampaign] ADD CONSTRAINT [SmsCampaign_templateId_fkey] FOREIGN KEY ([templateId]) REFERENCES [dbo].[SmsTemplate]([id]) ON DELETE SET NULL ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[Branch] ADD CONSTRAINT [Branch_districtId_fkey] FOREIGN KEY ([districtId]) REFERENCES [dbo].[District]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[Item] ADD CONSTRAINT [Item_merchantId_fkey] FOREIGN KEY ([merchantId]) REFERENCES [dbo].[Merchant]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[Item] ADD CONSTRAINT [Item_categoryId_fkey] FOREIGN KEY ([categoryId]) REFERENCES [dbo].[ProductCategory]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[ItemVariant] ADD CONSTRAINT [ItemVariant_itemId_fkey] FOREIGN KEY ([itemId]) REFERENCES [dbo].[Item]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[ItemOptionGroup] ADD CONSTRAINT [ItemOptionGroup_itemId_fkey] FOREIGN KEY ([itemId]) REFERENCES [dbo].[Item]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[ItemOptionValue] ADD CONSTRAINT [ItemOptionValue_groupId_fkey] FOREIGN KEY ([groupId]) REFERENCES [dbo].[ItemOptionGroup]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[DiscountRule] ADD CONSTRAINT [DiscountRule_itemId_fkey] FOREIGN KEY ([itemId]) REFERENCES [dbo].[Item]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[DiscountRule] ADD CONSTRAINT [DiscountRule_categoryId_fkey] FOREIGN KEY ([categoryId]) REFERENCES [dbo].[ProductCategory]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[Order] ADD CONSTRAINT [Order_borrowerId_fkey] FOREIGN KEY ([borrowerId]) REFERENCES [dbo].[Borrower]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[Order] ADD CONSTRAINT [Order_merchantId_fkey] FOREIGN KEY ([merchantId]) REFERENCES [dbo].[Merchant]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[Order] ADD CONSTRAINT [Order_loanApplicationId_fkey] FOREIGN KEY ([loanApplicationId]) REFERENCES [dbo].[LoanApplication]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[OrderItem] ADD CONSTRAINT [OrderItem_orderId_fkey] FOREIGN KEY ([orderId]) REFERENCES [dbo].[Order]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[OrderItem] ADD CONSTRAINT [OrderItem_itemId_fkey] FOREIGN KEY ([itemId]) REFERENCES [dbo].[Item]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[OrderItem] ADD CONSTRAINT [OrderItem_variantId_fkey] FOREIGN KEY ([variantId]) REFERENCES [dbo].[ItemVariant]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[OrderItemOptionSelection] ADD CONSTRAINT [OrderItemOptionSelection_orderItemId_fkey] FOREIGN KEY ([orderItemId]) REFERENCES [dbo].[OrderItem]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[OrderItemOptionSelection] ADD CONSTRAINT [OrderItemOptionSelection_optionValueId_fkey] FOREIGN KEY ([optionValueId]) REFERENCES [dbo].[ItemOptionValue]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[StockLocation] ADD CONSTRAINT [StockLocation_branchId_fkey] FOREIGN KEY ([branchId]) REFERENCES [dbo].[Branch]([id]) ON DELETE NO ACTION ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[InventoryLevel] ADD CONSTRAINT [InventoryLevel_itemId_fkey] FOREIGN KEY ([itemId]) REFERENCES [dbo].[Item]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[InventoryLevel] ADD CONSTRAINT [InventoryLevel_stockLocationId_fkey] FOREIGN KEY ([stockLocationId]) REFERENCES [dbo].[StockLocation]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE [dbo].[CombinationInventoryLevel] ADD CONSTRAINT [CombinationInventoryLevel_stockLocationId_fkey] FOREIGN KEY ([stockLocationId]) REFERENCES [dbo].[StockLocation]([id]) ON DELETE CASCADE ON UPDATE CASCADE;
 
 COMMIT TRAN;
 

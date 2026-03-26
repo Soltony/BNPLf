@@ -44,6 +44,8 @@ interface LoanOfferAndCalculatorProps {
   ) => void;
   providerColor?: string;
   isSubmitting?: boolean;
+  isBnplOrder?: boolean;
+  bnplAmount?: number;
 }
 
 const formatCurrency = (amount: number) => {
@@ -102,6 +104,8 @@ export function LoanOfferAndCalculator({
   onAccept,
   providerColor = "hsl(var(--primary))",
   isSubmitting = false,
+  isBnplOrder = false,
+  bnplAmount,
 }: LoanOfferAndCalculatorProps) {
   const [loanAmount, setLoanAmount] = useState<number | string>("");
   const [amountError, setAmountError] = useState("");
@@ -120,9 +124,13 @@ export function LoanOfferAndCalculator({
   const maxLoan = Math.min(effectiveProductMax, suggestedLoanAmountMax);
 
   useEffect(() => {
-    const initialAmount = Math.min(product.availableLimit ?? maxLoan, maxLoan);
-    setLoanAmount(initialAmount);
-  }, [product.id, product.availableLimit, maxLoan]);
+    if (isBnplOrder && bnplAmount && bnplAmount > 0) {
+      setLoanAmount(bnplAmount);
+    } else {
+      const initialAmount = Math.min(product.availableLimit ?? maxLoan, maxLoan);
+      setLoanAmount(initialAmount);
+    }
+  }, [product.id, product.availableLimit, maxLoan, isBnplOrder, bnplAmount]);
 
   useEffect(() => {
     const calculate = () => {
@@ -296,16 +304,18 @@ export function LoanOfferAndCalculator({
         <CardContent className="space-y-6">
           <div className="space-y-4">
             <Label htmlFor="loanAmount" className="text-sm font-medium">
-              Enter Your Desired Loan Amount
+              {isBnplOrder && bnplAmount ? 'Order Amount' : 'Enter Your Desired Loan Amount'}
             </Label>
             <Input
               id="loanAmount"
               type="number"
               value={loanAmount}
               onChange={handleAmountChange}
+              readOnly={!!(isBnplOrder && bnplAmount)}
               className={cn(
                 "w-full text-xl font-bold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                amountError ? "border-destructive ring-destructive ring-2" : ""
+                amountError ? "border-destructive ring-destructive ring-2" : "",
+                isBnplOrder && bnplAmount ? "bg-gray-50 cursor-not-allowed" : ""
               )}
               min={minLoan}
               max={maxLoan}
@@ -421,7 +431,7 @@ export function LoanOfferAndCalculator({
             disabled={!!amountError || isSubmitting}
             style={{ backgroundColor: providerColor }}
           >
-            {isSubmitting ? "Processing..." : "Accept and Disburse Loan"}
+            {isSubmitting ? "Processing..." : isBnplOrder ? "Accept and Place Order" : "Accept and Disburse Loan"}
           </Button>
         </CardFooter>
       </Card>

@@ -248,6 +248,8 @@ export interface User {
     providerId?: string | null;
     loanProviderId?: string | null;
     providerName?: string;
+    branchId?: string | null;
+    merchantId?: string | null;
     permissions: Permissions;
 }
 
@@ -556,3 +558,162 @@ export const SMS_PLACEHOLDERS = [
     { token: '{{penaltyAmount}}', description: 'Current penalty amount' },
 ] as const;
 
+
+// --------------------------------------
+// BNPL / COMMERCE TYPES
+// --------------------------------------
+
+export type MerchantStatus = 'ACTIVE' | 'INACTIVE' | 'PENDING_APPROVAL';
+
+export interface Merchant {
+    id: string;
+    name: string;
+    status: MerchantStatus;
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface ProductCategoryType {
+    id: string;
+    name: string;
+    status: 'ACTIVE' | 'INACTIVE';
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface ItemType {
+    id: string;
+    merchantId: string;
+    merchant?: Merchant;
+    categoryId: string;
+    category?: ProductCategoryType;
+    name: string;
+    description?: string | null;
+    price: number;
+    imageUrl?: string | null;
+    videoUrl?: string | null;
+    currency: string;
+    status: 'ACTIVE' | 'INACTIVE';
+    stockQuantity: number;
+    variants?: ItemVariantType[];
+    optionGroups?: ItemOptionGroupType[];
+    discountRules?: DiscountRuleType[];
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface ItemVariantType {
+    id: string;
+    itemId: string;
+    name: string;
+    size?: string | null;
+    color?: string | null;
+    material?: string | null;
+    price: number;
+    status: 'ACTIVE' | 'INACTIVE';
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface ItemOptionGroupType {
+    id: string;
+    itemId: string;
+    name: string;
+    values: ItemOptionValueType[];
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface ItemOptionValueType {
+    id: string;
+    groupId: string;
+    label: string;
+    priceDelta: number;
+}
+
+export type DiscountType = 'percentage' | 'fixed' | 'buy_x_get_y';
+
+export interface DiscountRuleType {
+    id: string;
+    name: string;
+    type: DiscountType;
+    value: number;
+    buyX?: number | null;
+    getY?: number | null;
+    itemId?: string | null;
+    item?: ItemType | null;
+    categoryId?: string | null;
+    category?: ProductCategoryType | null;
+    minQuantity: number;
+    startDate?: Date | null;
+    endDate?: Date | null;
+    status: 'ACTIVE' | 'INACTIVE';
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export type OrderStatus = 'PENDING_MERCHANT_CONFIRMATION' | 'ON_DELIVERY' | 'DELIVERED' | 'CANCELLED';
+
+export interface OrderItemType {
+    id: string;
+    orderId: string;
+    itemId: string;
+    item?: ItemType;
+    variantId?: string | null;
+    variant?: ItemVariantType | null;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    optionSelections?: OrderItemOptionSelectionType[];
+}
+
+export interface OrderItemOptionSelectionType {
+    id: string;
+    orderItemId: string;
+    optionValueId: string;
+    optionValue?: ItemOptionValueType;
+    priceDelta: number;
+}
+
+export interface OrderType {
+    id: string;
+    borrowerId: string;
+    merchantId: string;
+    merchant?: Merchant;
+    loanApplicationId?: string | null;
+    loanId?: string | null;
+    status: OrderStatus;
+    totalAmount: number;
+    currency: string;
+    orderItems?: OrderItemType[];
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface StockLocationType {
+    id: string;
+    name: string;
+    address?: string | null;
+    contactInfo?: string | null;
+    branchId?: string | null;
+    status: 'ACTIVE' | 'INACTIVE';
+    createdAt: Date;
+    updatedAt: Date;
+}
+
+export interface InventoryLevelType {
+    id: string;
+    itemId: string;
+    item?: ItemType;
+    stockLocationId: string;
+    stockLocation?: StockLocationType;
+    quantity: number;
+}
+
+export interface CombinationInventoryLevelType {
+    id: string;
+    combinationKey: string;
+    stockLocationId: string;
+    stockLocation?: StockLocationType;
+    quantity: number;
+}

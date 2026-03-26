@@ -1431,6 +1431,31 @@ async function applyChange(
         await prisma.tax.delete({ where: { id: entityId } });
       }
       break;
+
+    case "Merchant":
+      if (changeType === "CREATE") {
+        const { id: _mid, createdAt: _mca, updatedAt: _mua, ...merchantData } = data.created;
+        // Use upsert keyed on name to avoid unique constraint violations
+        // when the same merchant creation is approved more than once or a
+        // merchant with the same name already exists.
+        await prisma.merchant.upsert({
+          where: { name: merchantData.name },
+          create: { ...merchantData, status: "ACTIVE" },
+          update: { ...merchantData, status: "ACTIVE" },
+        });
+      } else if (changeType === "UPDATE") {
+        await prisma.merchant.update({
+          where: { id: entityId },
+          data: { ...data.updated },
+        });
+      } else if (changeType === "DELETE") {
+        await prisma.merchant.update({
+          where: { id: entityId },
+          data: { status: "INACTIVE" },
+        });
+      }
+      break;
+
     default:
       throw new Error(`Unknown entity type for approval: ${entityType}`);
   }

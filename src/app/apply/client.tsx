@@ -132,85 +132,144 @@ export function ApplyClient({
     setIsSubmitting(true);
 
     try {
-      // Personal Loan Flow: Disburse the loan directly
-      const finalDetails = {
-        borrowerId,
-        productId: selectedProduct.id,
-        loanAmount: details.loanAmount,
-        disbursedDate: details.disbursedDate,
-        dueDate: details.dueDate,
-        creditAccount: selectedAccount?.accountNumber || undefined,
-      };
+      const itemId = searchParams.get("itemId");
+      const isBnplOrder = !!itemId;
 
-      const response = await fetch("/api/loans", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(finalDetails),
-      });
+      if (isBnplOrder) {
+        // ── BNPL Flow: NO loan creation here. Just create the order. ──
+        // The loan will be created when borrower confirms delivery.
+        const qty = parseInt(searchParams.get("qty") || "1", 10) || 1;
+        const optionValueIds = searchParams.get("optionValueIds");
+        const optionSelections = optionValueIds
+          ? optionValueIds.split(",").map((vid) => ({ optionValueId: vid }))
+          : [];
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to save the loan.");
-      }
+        // Fetch item to get merchantId
+        const itemRes = await fetch(`/api/shop/${itemId}`);
+        if (!itemRes.ok) throw new Error("Failed to fetch item details.");
+        const itemData = await itemRes.json();
 
-      const savedLoan = await response.json();
+        const orderRes = await fetch("/api/bnpl/orders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            borrowerId,
+            merchantId: itemData.merchantId || itemData.merchant?.id,
+            productId: selectedProduct.id,
+            loanAmount: details.loanAmount,
+            creditAccount: selectedAccount?.accountNumber || "",
+            items: [{ itemId, quantity: qty, optionSelections }],
+          }),
+        });
 
-      const displayLoan: LoanDetails = {
-        ...savedLoan,
-        providerName: provider.name,
-        productName: selectedProduct.name,
-        disbursedDate: new Date(savedLoan.disbursedDate),
-        dueDate: new Date(savedLoan.dueDate),
-        payments: [],
-      };
-      setLoanDetails(displayLoan);
-      setStep("details");
-      // Inform user and attempt to call external disbursement proxy if an account was selected
-      toast({ title: "Success!", description: "Your loan has been saved." });
+        if (!orderRes.ok) {
+          const err = await orderRes.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to place order.");
+        }
 
-      try {
-        if (selectedAccount && selectedAccount.accountNumber) {
-          const disRes = await fetch("/api/external/disbursement", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              creditAccount: selectedAccount.accountNumber,
-              providerId: provider.id,
-              amount: savedLoan.loanAmount,
-              loanId: savedLoan.id,
-            }),
-          });
+        // Build display-only details (no real loan exists yet)
+        const displayLoan: LoanDetails = {
+          id: "pending-bnpl",
+          loanAmount: details.loanAmount,
+          serviceFee: details.serviceFee || 0,
+          disbursedDate: new Date(details.disbursedDate),
+          dueDate: new Date(details.dueDate),
+          repaymentStatus: "Unpaid",
+          payments: [],
+          productName: selectedProduct.name,
+          providerName: provider.name,
+          repaidAmount: 0,
+          penaltyAmount: 0,
+          product: selectedProduct,
+        };
+        setLoanDetails(displayLoan);
+        setStep("details");
+        toast({
+          title: "Order placed!",
+          description:
+            "Your order has been placed. The loan will be disbursed once you confirm delivery.",
+        });
+      } else {
+        // ── Regular Loan Flow: Create loan and disburse immediately ──
+        const finalDetails = {
+          borrowerId,
+          productId: selectedProduct.id,
+          loanAmount: details.loanAmount,
+          disbursedDate: details.disbursedDate,
+          dueDate: details.dueDate,
+          creditAccount: selectedAccount?.accountNumber || undefined,
+        };
 
-          if (!disRes.ok) {
-            const err = await disRes.json().catch(() => null);
-            toast({
-              title: "Disbursement failed",
-              description:
-                err?.error ||
-                JSON.stringify(err) ||
-                "Upstream disbursement failed",
-              variant: "destructive",
+        const response = await fetch("/api/loans", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(finalDetails),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || "Failed to save the loan.");
+        }
+
+        const savedLoan = await response.json();
+
+        const displayLoan: LoanDetails = {
+          ...savedLoan,
+          providerName: provider.name,
+          productName: selectedProduct.name,
+          disbursedDate: new Date(savedLoan.disbursedDate),
+          dueDate: new Date(savedLoan.dueDate),
+          payments: [],
+        };
+        setLoanDetails(displayLoan);
+        setStep("details");
+        toast({ title: "Success!", description: "Your loan has been saved." });
+
+        // Disburse immediately
+        try {
+          if (selectedAccount && selectedAccount.accountNumber) {
+            const disRes = await fetch("/api/external/disbursement", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                creditAccount: selectedAccount.accountNumber,
+                providerId: provider.id,
+                amount: savedLoan.loanAmount,
+                loanId: savedLoan.id,
+              }),
             });
+
+            if (!disRes.ok) {
+              const err = await disRes.json().catch(() => null);
+              toast({
+                title: "Disbursement failed",
+                description:
+                  err?.error ||
+                  JSON.stringify(err) ||
+                  "Upstream disbursement failed",
+                variant: "destructive",
+              });
+            } else {
+              toast({
+                title: "Disbursement sent",
+                description: "External disbursement request was sent.",
+              });
+            }
           } else {
             toast({
-              title: "Disbursement sent",
-              description: "External disbursement request was sent.",
+              title: "No account selected",
+              description:
+                "No disbursement account was selected; external transfer was not attempted.",
+              variant: "warning",
             });
           }
-        } else {
+        } catch (err: any) {
           toast({
-            title: "No account selected",
-            description:
-              "No disbursement account was selected; external transfer was not attempted.",
-            variant: "warning",
+            title: "Disbursement error",
+            description: String(err?.message ?? err),
+            variant: "destructive",
           });
         }
-      } catch (err: any) {
-        toast({
-          title: "Disbursement error",
-          description: String(err?.message ?? err),
-          variant: "destructive",
-        });
       }
     } catch (error: any) {
       toast({
@@ -231,10 +290,15 @@ export function ApplyClient({
   };
 
   const handleReset = () => {
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("product");
-    params.delete("step");
-    router.push(`/loan?${params.toString()}`);
+    const bp = searchParams.get("borrowerId") || "";
+    const itemId = searchParams.get("itemId");
+    if (itemId) {
+      // BNPL: go to orders page
+      router.push(`/bnpl/orders?borrowerId=${encodeURIComponent(bp)}`);
+    } else {
+      // Regular loan: go back to dashboard
+      router.push(`/loan?borrowerId=${encodeURIComponent(bp)}`);
+    }
   };
 
   const renderStep = () => {
@@ -250,6 +314,8 @@ export function ApplyClient({
               onAccept={handleLoanAccept}
               providerColor={provider.colorHex}
               isSubmitting={isSubmitting}
+              isBnplOrder={!!searchParams.get("itemId")}
+              bnplAmount={searchParams.get("amount") ? parseFloat(searchParams.get("amount")!) : undefined}
             />
           );
         }
@@ -282,6 +348,7 @@ export function ApplyClient({
               product={selectedProduct}
               onReset={handleReset}
               providerColor={provider.colorHex}
+              isBnplOrder={!!searchParams.get("itemId")}
             />
           );
         }

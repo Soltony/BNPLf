@@ -17,6 +17,7 @@ interface LoanDetailsViewProps {
   product: LoanProduct;
   onReset: () => void;
   providerColor?: string;
+  isBnplOrder?: boolean;
 }
 
 const formatCurrency = (amount: number) => {
@@ -49,13 +50,19 @@ const formatPenaltyRule = (rule: PenaltyRule): string => {
 }
 
 
-export function LoanDetailsView({ details, product, onReset, providerColor = 'hsl(var(--primary))' }: LoanDetailsViewProps) {
+export function LoanDetailsView({ details, product, onReset, providerColor = 'hsl(var(--primary))', isBnplOrder = false }: LoanDetailsViewProps) {
   
   return (
     <div className="max-w-2xl mx-auto">
        <div className="text-center mb-8">
-        <h1 className="text-3xl font-bold tracking-tight md:text-4xl" style={{color: providerColor}}>Loan Disbursed Successfully!</h1>
-        <p className="text-lg text-muted-foreground mt-2">Here is a summary of your new loan.</p>
+        <h1 className="text-3xl font-bold tracking-tight md:text-4xl" style={{color: providerColor}}>
+          {isBnplOrder ? 'Order Placed Successfully!' : 'Loan Disbursed Successfully!'}
+        </h1>
+        <p className="text-lg text-muted-foreground mt-2">
+          {isBnplOrder
+            ? 'Your BNPL order has been placed. The loan will be disbursed after you confirm delivery.'
+            : 'Here is a summary of your new loan.'}
+        </p>
       </div>
       <Card className="shadow-lg">
         <CardHeader>
@@ -114,7 +121,7 @@ export function LoanDetailsView({ details, product, onReset, providerColor = 'hs
         </CardContent>
         <CardFooter>
           <Button className="w-full text-white" onClick={onReset} style={{backgroundColor: providerColor}}>
-            Start New Application
+            {isBnplOrder ? 'View My Orders' : 'Start New Application'}
           </Button>
         </CardFooter>
       </Card>

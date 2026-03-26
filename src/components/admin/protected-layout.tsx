@@ -23,8 +23,17 @@ import {
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
+  SidebarMenuSub,
+  SidebarMenuSubItem,
+  SidebarMenuSubButton,
   SidebarTrigger,
 } from '@/components/ui/sidebar';
+import {
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from '@/components/ui/collapsible';
+import { ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import {
@@ -132,7 +141,7 @@ export function ProtectedLayout({ children, providers }: ProtectedLayoutProps) {
     if (!currentUser || !currentUser.permissions) return false;
     const current = currentMenuItem;
     if (!current) return true; // allow non-admin menu routes (handled elsewhere)
-    const moduleName = current.label.toLowerCase().replace(/\s+/g, '-');
+    const moduleName = current.permissionKey || current.label.toLowerCase().replace(/\s+/g, '-');
     return !!currentUser.permissions[moduleName]?.read;
   }, [currentUser, currentMenuItem]);
 
@@ -172,21 +181,66 @@ export function ProtectedLayout({ children, providers }: ProtectedLayoutProps) {
           </SidebarHeader>
           <SidebarContent>
             <SidebarMenu>
-              {menuItems.map((item) => (
-                <SidebarMenuItem key={item.label}>
-                  <Link href={item.path}>
-                    <SidebarMenuButton
-                      isActive={pathname.startsWith(item.path) && (item.path !== '/admin' || pathname === '/admin')}
-                      tooltip={{
-                        children: item.label,
-                      }}
-                    >
-                      <item.icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </Link>
-                </SidebarMenuItem>
-              ))}
+              {menuItems.map((item) => {
+                const hasChildren = item.children && item.children.length > 0;
+                const isParentActive = pathname.startsWith(item.path) && (item.path !== '/admin' || pathname === '/admin');
+
+                if (hasChildren) {
+                  return (
+                    <Collapsible key={item.label} defaultOpen={isParentActive} className="group/collapsible">
+                      <SidebarMenuItem>
+                        <CollapsibleTrigger asChild>
+                          <SidebarMenuButton
+                            isActive={isParentActive}
+                            tooltip={{ children: item.label }}
+                          >
+                            <item.icon />
+                            <span>{item.label}</span>
+                            <ChevronDown className="ml-auto h-4 w-4 transition-transform group-data-[state=open]/collapsible:rotate-180" />
+                          </SidebarMenuButton>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <SidebarMenuSub>
+                            {item.children!.map((child) => (
+                              <SidebarMenuSubItem key={child.label}>
+                                <SidebarMenuSubButton
+                                  asChild
+                                  isActive={
+                                    child.path === '/admin/merchants'
+                                      ? pathname === '/admin/merchants' || pathname.startsWith('/admin/merchants/items')
+                                      : pathname.startsWith(child.path)
+                                  }
+                                >
+                                  <Link href={child.path}>
+                                    <child.icon className="h-4 w-4" />
+                                    <span>{child.label}</span>
+                                  </Link>
+                                </SidebarMenuSubButton>
+                              </SidebarMenuSubItem>
+                            ))}
+                          </SidebarMenuSub>
+                        </CollapsibleContent>
+                      </SidebarMenuItem>
+                    </Collapsible>
+                  );
+                }
+
+                return (
+                  <SidebarMenuItem key={item.label}>
+                    <Link href={item.path}>
+                      <SidebarMenuButton
+                        isActive={pathname.startsWith(item.path) && (item.path !== '/admin' || pathname === '/admin')}
+                        tooltip={{
+                          children: item.label,
+                        }}
+                      >
+                        <item.icon />
+                        <span>{item.label}</span>
+                      </SidebarMenuButton>
+                    </Link>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
           </SidebarContent>
         </Sidebar>
