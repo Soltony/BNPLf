@@ -27,7 +27,9 @@ const statusColor: Record<string, string> = {
   CANCELLED: 'bg-red-100 text-red-800 border-red-300',
 };
 
-export default function BnplOrdersPage() {
+import { Suspense } from 'react';
+
+function BnplOrdersPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const borrowerId = searchParams?.get('borrowerId') || '';
@@ -285,5 +287,14 @@ export default function BnplOrdersPage() {
         </Dialog>
       </div>
     </div>
+  );
+
+}
+
+export default function BnplOrdersPage() {
+  return (
+    <Suspense fallback={<div>Loading orders...</div>}>
+      <BnplOrdersPageInner />
+    </Suspense>
   );
 }
