@@ -3,6 +3,22 @@ import prisma from '@/lib/prisma';
 import { getUserFromSession } from '@/lib/user';
 import { createAuditLog } from '@/lib/audit-log';
 
+function normalizeOptionGroups(groups: any[]): Array<{ name: string; values: Array<{ label: string; priceDelta: number }> }> {
+  return (groups || [])
+    .map((g: any) => ({
+      name: String(g?.name || '').trim(),
+      values: (g?.values || [])
+        .map((v: any) => ({
+          label: String(v?.label || '').trim(),
+          priceDelta: Number.parseFloat(String(v?.priceDelta ?? 0)) || 0,
+        }))
+        .filter((v: any) => v.label)
+        .sort((a: any, b: any) => a.label.localeCompare(b.label)),
+    }))
+    .filter((g: any) => g.name)
+    .sort((a: any, b: any) => a.name.localeCompare(b.name));
+}
+
 export async function GET(req: NextRequest) {
   const user = await getUserFromSession();
   if (!user) return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
@@ -35,7 +51,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, variants, optionGroups } = body;
+    const { merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, variants, optionGroups } = body;
 
     if (!merchantId || !categoryId || !name || price == null) {
       return NextResponse.json({ error: 'merchantId, categoryId, name, and price are required' }, { status: 400 });
@@ -51,6 +67,7 @@ export async function POST(req: NextRequest) {
         imageUrl: imageUrl || null,
         videoUrl: videoUrl || null,
         status: status || 'ACTIVE',
+        sellingOption: sellingOption || 'BNPL_ONLY',
         variants: variants?.length ? {
           create: variants.map((v: any) => ({
             name: v.name,
@@ -92,8 +109,39 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { id, merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, variants, optionGroups } = body;
+    const { id, merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, variants, optionGroups } = body;
     if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
+
+    let optionGroupsChanged = false;
+    if (optionGroups) {
+      const existingOptionGroups = await prisma.itemOptionGroup.findMany({
+        where: { itemId: id },
+        include: { values: true },
+      });
+
+      const existingNormalized = normalizeOptionGroups(existingOptionGroups);
+      const submittedNormalized = normalizeOptionGroups(optionGroups);
+      optionGroupsChanged = JSON.stringify(existingNormalized) !== JSON.stringify(submittedNormalized);
+
+      if (optionGroupsChanged) {
+        const linkedSelectionsCount = await prisma.orderItemOptionSelection.count({
+          where: {
+            optionValue: {
+              group: { itemId: id },
+            },
+          },
+        });
+
+        if (linkedSelectionsCount > 0) {
+          return NextResponse.json(
+            {
+              error: 'Cannot modify item attributes because they are already used in existing orders. You can still update selling option, status, pricing, and other non-attribute fields.',
+            },
+            { status: 400 }
+          );
+        }
+      }
+    }
 
     // Update the item
     const updated = await prisma.item.update({
@@ -107,6 +155,7 @@ export async function PUT(req: NextRequest) {
         imageUrl: imageUrl ?? undefined,
         videoUrl: videoUrl ?? undefined,
         ...(status && { status }),
+        ...(sellingOption && { sellingOption }),
       },
       include: { merchant: true, category: true, variants: true, optionGroups: { include: { values: true } } },
     });
@@ -129,8 +178,8 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    // If option groups provided, replace them
-    if (optionGroups) {
+    // If option groups provided and changed, replace them
+    if (optionGroups && optionGroupsChanged) {
       await prisma.itemOptionGroup.deleteMany({ where: { itemId: id } });
       for (const g of optionGroups) {
         await prisma.itemOptionGroup.create({

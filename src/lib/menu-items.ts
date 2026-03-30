@@ -83,6 +83,13 @@ export const allMenuItems: MenuItem[] = [
     roles: ['Super Admin', 'Loan Manager'],
   },
   {
+    path: '/admin/districts',
+    label: 'Districts',
+    icon: MapPin,
+    roles: ['Super Admin', 'Loan Manager'],
+    permissionKey: 'branch',
+  },
+  {
     path: '/admin/merchants',
     label: 'Merchants',
     icon: Store,

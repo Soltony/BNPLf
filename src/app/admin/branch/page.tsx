@@ -10,8 +10,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle } from 'lucide-react';
+import { PlusCircle, Upload } from 'lucide-react';
 import { useRequirePermission } from '@/hooks/use-require-permission';
 
 type TabKey = 'merchants' | 'merchant-users' | 'product-categories';
@@ -30,6 +32,15 @@ export default function BranchPage() {
   const [merchantDialogOpen, setMerchantDialogOpen] = useState(false);
   const [editingMerchant, setEditingMerchant] = useState<any>(null);
   const [merchantName, setMerchantName] = useState('');
+  const [merchantAccountNumber, setMerchantAccountNumber] = useState('');
+  const [merchantIconFile, setMerchantIconFile] = useState<File | null>(null);
+  const [merchantIconPreview, setMerchantIconPreview] = useState('');
+  const [merchantContactPersonName, setMerchantContactPersonName] = useState('');
+  const [merchantContactPersonPhone, setMerchantContactPersonPhone] = useState('');
+  const [merchantContactPersonEmail, setMerchantContactPersonEmail] = useState('');
+  const [merchantAdditionalContact, setMerchantAdditionalContact] = useState('');
+  const [merchantBnplEnabled, setMerchantBnplEnabled] = useState(true);
+  const [merchantStatus, setMerchantStatus] = useState('ACTIVE');
 
   // Category form
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -79,19 +90,64 @@ export default function BranchPage() {
   }, [merchants]);
 
   // --- Merchants Tab ---
+  const resetMerchantForm = () => {
+    setEditingMerchant(null);
+    setMerchantName('');
+    setMerchantAccountNumber('');
+    setMerchantIconFile(null);
+    setMerchantIconPreview('');
+    setMerchantContactPersonName('');
+    setMerchantContactPersonPhone('');
+    setMerchantContactPersonEmail('');
+    setMerchantAdditionalContact('');
+    setMerchantBnplEnabled(true);
+    setMerchantStatus('ACTIVE');
+  };
+
   const handleSaveMerchant = async () => {
     setLoading(true);
     try {
+      let iconUrl: string | null = null;
+      if (merchantIconFile) {
+        const reader = new FileReader();
+        iconUrl = await new Promise<string>((resolve) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(merchantIconFile);
+        });
+      } else if (editingMerchant?.iconUrl) {
+        iconUrl = editingMerchant.iconUrl;
+      }
+
       const method = editingMerchant ? 'PUT' : 'POST';
       const body = editingMerchant
-        ? { id: editingMerchant.id, name: merchantName }
-        : { name: merchantName };
+        ? {
+            id: editingMerchant.id,
+            name: merchantName,
+            status: merchantStatus,
+            accountNumber: merchantAccountNumber,
+            iconUrl,
+            contactPersonName: merchantContactPersonName,
+            contactPersonPhone: merchantContactPersonPhone,
+            contactPersonEmail: merchantContactPersonEmail,
+            additionalContactInfo: merchantAdditionalContact,
+            bnplEnabled: merchantBnplEnabled,
+          }
+        : {
+            name: merchantName,
+            status: merchantStatus,
+            accountNumber: merchantAccountNumber,
+            iconUrl,
+            contactPersonName: merchantContactPersonName,
+            contactPersonPhone: merchantContactPersonPhone,
+            contactPersonEmail: merchantContactPersonEmail,
+            additionalContactInfo: merchantAdditionalContact,
+            bnplEnabled: merchantBnplEnabled,
+          };
       const res = await fetch('/api/merchants', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
       toast({ title: editingMerchant ? 'Update submitted for approval' : 'Merchant submitted for approval' });
       setMerchantDialogOpen(false);
-      setEditingMerchant(null);
-      setMerchantName('');
+      resetMerchantForm();
       fetchMerchants();
     } catch (e: any) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
@@ -202,17 +258,113 @@ export default function BranchPage() {
         <Card>
           <CardContent className="pt-6">
             <div className="flex justify-end mb-4">
-              <Dialog open={merchantDialogOpen} onOpenChange={(o) => { setMerchantDialogOpen(o); if (!o) { setEditingMerchant(null); setMerchantName(''); } }}>
+              <Dialog open={merchantDialogOpen} onOpenChange={(o) => { setMerchantDialogOpen(o); if (!o) resetMerchantForm(); }}>
                 <DialogTrigger asChild>
                   <Button className="bg-orange-500 hover:bg-orange-600"><PlusCircle className="mr-2 h-4 w-4" />Add Merchant</Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                   <DialogHeader><DialogTitle>{editingMerchant ? 'Edit Merchant' : 'Add Merchant'}</DialogTitle></DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label>Name</Label>
-                      <Input value={merchantName} onChange={e => setMerchantName(e.target.value)} placeholder="Merchant name" />
+                  <div className="space-y-6">
+                    {/* Basic Information */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Basic Information</h3>
+                      <div>
+                        <Label>Name <span className="text-red-500">*</span></Label>
+                        <Input value={merchantName} onChange={e => setMerchantName(e.target.value)} placeholder="Merchant name" />
+                      </div>
+                      <div>
+                        <Label>Account Number</Label>
+                        <Input value={merchantAccountNumber} onChange={e => setMerchantAccountNumber(e.target.value)} placeholder="Account number" />
+                      </div>
+                      <div>
+                        <Label>Status</Label>
+                        <Select value={merchantStatus} onValueChange={setMerchantStatus}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="ACTIVE">Active</SelectItem>
+                            <SelectItem value="INACTIVE">Inactive</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div>
+                        <Label>Icon</Label>
+                        <div className="flex items-center gap-4">
+                          {(merchantIconPreview || editingMerchant?.iconUrl) && (
+                            <img
+                              src={merchantIconPreview || editingMerchant?.iconUrl}
+                              alt="Merchant icon preview"
+                              className="h-16 w-16 rounded-lg object-cover border"
+                            />
+                          )}
+                          <label className="flex items-center gap-2 px-4 py-2 border rounded-md cursor-pointer hover:bg-muted transition-colors text-sm">
+                            <Upload className="h-4 w-4" />
+                            {merchantIconFile ? merchantIconFile.name : 'Upload icon'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0] || null;
+                                setMerchantIconFile(file);
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = () => setMerchantIconPreview(reader.result as string);
+                                  reader.readAsDataURL(file);
+                                } else {
+                                  setMerchantIconPreview('');
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                      </div>
                     </div>
+
+                    {/* BNPL Toggle */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Payment Options</h3>
+                      <div className="flex items-center justify-between rounded-lg border p-4">
+                        <div className="space-y-0.5">
+                          <Label className="text-base">Enable BNPL (Buy Now, Pay Later)</Label>
+                          <p className="text-sm text-muted-foreground">Allow this merchant to support BNPL transactions</p>
+                        </div>
+                        <Switch checked={merchantBnplEnabled} onCheckedChange={setMerchantBnplEnabled} />
+                      </div>
+                    </div>
+
+                    {/* Business Deal / Contact Person */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Business Deal Information</h3>
+                      <div>
+                        <Label>Contact Person Name</Label>
+                        <Input value={merchantContactPersonName} onChange={e => setMerchantContactPersonName(e.target.value)} placeholder="Full name of contact person" />
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <Label>Contact Person Phone</Label>
+                          <Input value={merchantContactPersonPhone} onChange={e => setMerchantContactPersonPhone(e.target.value)} placeholder="Phone number" />
+                        </div>
+                        <div>
+                          <Label>Contact Person Email</Label>
+                          <Input type="email" value={merchantContactPersonEmail} onChange={e => setMerchantContactPersonEmail(e.target.value)} placeholder="Email address" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Additional Contact Info */}
+                    <div className="space-y-4">
+                      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Additional Contact Information</h3>
+                      <div>
+                        <Label>Extra Contact Details</Label>
+                        <Textarea
+                          value={merchantAdditionalContact}
+                          onChange={e => setMerchantAdditionalContact(e.target.value)}
+                          placeholder="Any additional contact information (e.g. secondary phone, address, social media, etc.)"
+                          rows={3}
+                        />
+                      </div>
+                    </div>
+
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={() => setMerchantDialogOpen(false)}>Cancel</Button>
                       <Button onClick={handleSaveMerchant} disabled={loading || !merchantName.trim()}>
@@ -227,17 +379,26 @@ export default function BranchPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Name</TableHead>
+                  <TableHead>Account Number</TableHead>
+                  <TableHead>Contact Person</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {merchants.filter(m => m.status === 'ACTIVE').map(m => (
+                {merchants.map(m => (
                   <TableRow key={m.id}>
-                    <TableCell className="font-medium">{m.name}</TableCell>
-                    <TableCell><Badge variant="outline">{m.status}</Badge></TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        {m.iconUrl && <img src={m.iconUrl} alt="" className="h-8 w-8 rounded object-cover" />}
+                        {m.name}
+                      </div>
+                    </TableCell>
+                    <TableCell>{m.accountNumber || '-'}</TableCell>
+                    <TableCell>{m.contactPersonName || '-'}</TableCell>
+                    <TableCell><Badge variant={m.status === 'ACTIVE' ? 'default' : 'secondary'}>{m.status}</Badge></TableCell>
                     <TableCell className="text-right space-x-2">
-                      <Button size="sm" variant="outline" onClick={() => { setEditingMerchant(m); setMerchantName(m.name); setMerchantDialogOpen(true); }}>Edit</Button>
+                      <Button size="sm" variant="outline" onClick={() => { setEditingMerchant(m); setMerchantName(m.name); setMerchantAccountNumber(m.accountNumber || ''); setMerchantIconPreview(m.iconUrl || ''); setMerchantContactPersonName(m.contactPersonName || ''); setMerchantContactPersonPhone(m.contactPersonPhone || ''); setMerchantContactPersonEmail(m.contactPersonEmail || ''); setMerchantAdditionalContact(m.additionalContactInfo || ''); setMerchantBnplEnabled(m.bnplEnabled !== false); setMerchantStatus(m.status || 'ACTIVE'); setMerchantDialogOpen(true); }}>Edit</Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild><Button size="sm" variant="destructive">Delete</Button></AlertDialogTrigger>
                         <AlertDialogContent>
@@ -248,8 +409,8 @@ export default function BranchPage() {
                     </TableCell>
                   </TableRow>
                 ))}
-                {merchants.filter(m => m.status === 'ACTIVE').length === 0 && (
-                  <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-8">No merchants found.</TableCell></TableRow>
+                {merchants.length === 0 && (
+                  <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">No merchants found.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>

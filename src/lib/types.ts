@@ -568,6 +568,12 @@ export type MerchantStatus = 'ACTIVE' | 'INACTIVE' | 'PENDING_APPROVAL';
 export interface Merchant {
     id: string;
     name: string;
+    accountNumber?: string | null;
+    iconUrl?: string | null;
+    contactPersonName?: string | null;
+    contactPersonPhone?: string | null;
+    contactPersonEmail?: string | null;
+    additionalContactInfo?: string | null;
     status: MerchantStatus;
     createdAt: Date;
     updatedAt: Date;

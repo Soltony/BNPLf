@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { name } = body;
+    const { name, status, accountNumber, iconUrl, contactPersonName, contactPersonPhone, contactPersonEmail, additionalContactInfo, bnplEnabled } = body;
     if (!name?.trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
     // Create as PendingChange for maker-checker
@@ -32,7 +32,17 @@ export async function POST(req: NextRequest) {
       data: {
         entityType: 'Merchant',
         changeType: 'CREATE',
-        payload: JSON.stringify({ created: { name: name.trim(), status: 'ACTIVE' } }),
+        payload: JSON.stringify({ created: {
+          name: name.trim(),
+          accountNumber: accountNumber?.trim() || null,
+          iconUrl: iconUrl || null,
+          contactPersonName: contactPersonName?.trim() || null,
+          contactPersonPhone: contactPersonPhone?.trim() || null,
+          contactPersonEmail: contactPersonEmail?.trim() || null,
+          additionalContactInfo: additionalContactInfo?.trim() || null,
+          bnplEnabled: bnplEnabled !== false,
+          status: status || 'ACTIVE',
+        } }),
         createdById: user.id,
       },
     });
@@ -41,7 +51,7 @@ export async function POST(req: NextRequest) {
       actorId: user.id,
       action: 'CREATE_MERCHANT_REQUEST',
       entity: 'Merchant',
-      details: JSON.stringify({ name }),
+      details: JSON.stringify({ name, accountNumber }),
     });
 
     return NextResponse.json(pending, { status: 201 });
@@ -59,7 +69,7 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { id, name, status } = body;
+    const { id, name, status, accountNumber, iconUrl, contactPersonName, contactPersonPhone, contactPersonEmail, additionalContactInfo, bnplEnabled } = body;
     if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
 
     const existing = await prisma.merchant.findUnique({ where: { id } });
@@ -72,7 +82,17 @@ export async function PUT(req: NextRequest) {
         changeType: 'UPDATE',
         payload: JSON.stringify({
           original: existing,
-          updated: { name: name ?? existing.name, status: status ?? existing.status },
+          updated: {
+            name: name ?? existing.name,
+            status: status ?? existing.status,
+            accountNumber: accountNumber !== undefined ? (accountNumber?.trim() || null) : existing.accountNumber,
+            iconUrl: iconUrl !== undefined ? (iconUrl || null) : existing.iconUrl,
+            contactPersonName: contactPersonName !== undefined ? (contactPersonName?.trim() || null) : existing.contactPersonName,
+            contactPersonPhone: contactPersonPhone !== undefined ? (contactPersonPhone?.trim() || null) : existing.contactPersonPhone,
+            contactPersonEmail: contactPersonEmail !== undefined ? (contactPersonEmail?.trim() || null) : existing.contactPersonEmail,
+            additionalContactInfo: additionalContactInfo !== undefined ? (additionalContactInfo?.trim() || null) : existing.additionalContactInfo,
+            bnplEnabled: bnplEnabled !== undefined ? bnplEnabled : existing.bnplEnabled,
+          },
         }),
         createdById: user.id,
       },
@@ -83,7 +103,7 @@ export async function PUT(req: NextRequest) {
       action: 'UPDATE_MERCHANT_REQUEST',
       entity: 'Merchant',
       entityId: id,
-      details: JSON.stringify({ name, status }),
+      details: JSON.stringify({ name, status, accountNumber }),
     });
 
     return NextResponse.json(pending);

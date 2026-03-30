@@ -32,6 +32,7 @@ export default function NewItemPage() {
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
   const [status, setStatus] = useState('ACTIVE');
+  const [sellingOption, setSellingOption] = useState('BNPL_ONLY');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState('');
 
@@ -48,7 +49,7 @@ export default function NewItemPage() {
       fetch('/api/merchants/categories').then(r => r.json()),
       fetch('/api/branches/locations').then(r => r.json()),
     ]).then(([m, c, l]) => {
-      setMerchants(m.filter?.((x: any) => x.status === 'ACTIVE') || []);
+      setMerchants(Array.isArray(m) ? m : []);
       setCategories(c.filter?.((x: any) => x.status === 'ACTIVE') || []);
       setLocations(l.filter?.((x: any) => x.status === 'ACTIVE') || []);
     });
@@ -174,6 +175,7 @@ export default function NewItemPage() {
           imageUrl,
           videoUrl: videoUrl || null,
           status,
+          sellingOption,
           optionGroups: optionGroups.length > 0 ? optionGroups : undefined,
         }),
       });
@@ -268,6 +270,17 @@ export default function NewItemPage() {
                 <SelectContent>
                   <SelectItem value="ACTIVE">ACTIVE</SelectItem>
                   <SelectItem value="INACTIVE">INACTIVE</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Selling Option</Label>
+              <Select value={sellingOption} onValueChange={setSellingOption}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="BNPL_ONLY">BNPL Only</SelectItem>
+                  <SelectItem value="DIRECT_ONLY">Direct Payment Only</SelectItem>
+                  <SelectItem value="BOTH">Both (BNPL + Direct)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

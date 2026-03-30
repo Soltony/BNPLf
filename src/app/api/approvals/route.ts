@@ -1440,8 +1440,8 @@ async function applyChange(
         // merchant with the same name already exists.
         await prisma.merchant.upsert({
           where: { name: merchantData.name },
-          create: { ...merchantData, status: "ACTIVE" },
-          update: { ...merchantData, status: "ACTIVE" },
+          create: { ...merchantData, status: merchantData.status ?? "ACTIVE" },
+          update: { ...merchantData, status: merchantData.status ?? "ACTIVE" },
         });
       } else if (changeType === "UPDATE") {
         await prisma.merchant.update({

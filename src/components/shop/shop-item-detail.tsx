@@ -5,9 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { PlayCircle, ShoppingCart, Minus, Plus, Package, ArrowLeft, ChevronRight, Percent, Tag } from 'lucide-react';
+import { PlayCircle, ShoppingCart, Minus, Plus, Package, ArrowLeft, ChevronRight, Percent, Tag, CreditCard, Banknote } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
+
+const MERCHANT_RESPONDED_STATUSES = ['PENDING_DELIVERY', 'ON_DELIVERY', 'CANCELLED'];
+
+const getSeenOrderResponsesKey = (borrowerId: string) => `bnpl_seen_order_responses:${borrowerId}`;
 
 export function ShopItemDetail() {
   const router = useRouter();
@@ -20,6 +24,26 @@ export function ShopItemDetail() {
   const [item, setItem] = useState<any>(null);
   const [quantity, setQuantity] = useState(qtyParam);
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
+  const [orderCount, setOrderCount] = useState(0);
+  const [placingOrder, setPlacingOrder] = useState(false);
+
+  useEffect(() => {
+    if (!borrowerId) return;
+    fetch(`/api/bnpl/orders?borrowerId=${borrowerId}`)
+      .then((r) => r.json())
+      .then((orders) => {
+        if (Array.isArray(orders)) {
+          const seenRaw = window.localStorage.getItem(getSeenOrderResponsesKey(borrowerId));
+          const seen = new Set<string>(seenRaw ? JSON.parse(seenRaw) : []);
+          const unseenCount = orders.filter((o: any) => {
+            if (!MERCHANT_RESPONDED_STATUSES.includes(o.status)) return false;
+            return !seen.has(`${o.id}:${o.status}`);
+          }).length;
+          setOrderCount(unseenCount);
+        }
+      })
+      .catch(() => {});
+  }, [borrowerId]);
 
   useEffect(() => {
     if (!itemId) return;
@@ -120,6 +144,38 @@ export function ShopItemDetail() {
     router.push(`/loan?${sp.toString()}`);
   };
 
+  const handlePlaceDirectOrder = async () => {
+    if (placingOrder) return;
+    setPlacingOrder(true);
+    try {
+      const optionSelections = Object.values(selectedOptions)
+        .filter(Boolean)
+        .map((vid) => ({ optionValueId: vid }));
+
+      const res = await fetch('/api/bnpl/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          borrowerId,
+          merchantId: item.merchantId || item.merchant?.id,
+          items: [{ itemId, quantity, optionSelections }],
+          paymentType: 'DIRECT',
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to place order.');
+      }
+
+      router.push(`/bnpl/orders?borrowerId=${encodeURIComponent(borrowerId)}`);
+    } catch (e: any) {
+      alert(e.message || 'Failed to place order');
+    } finally {
+      setPlacingOrder(false);
+    }
+  };
+
   if (!item) {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100/80 flex items-center justify-center">
@@ -147,10 +203,15 @@ export function ShopItemDetail() {
           </div>
           <Link
             href={`/bnpl/orders?borrowerId=${borrowerId}`}
-            className="inline-flex items-center gap-1.5 text-white/90 hover:text-white font-medium text-sm transition-colors"
+            className="relative inline-flex items-center gap-1.5 text-white/90 hover:text-white font-medium text-sm transition-colors"
           >
             <ShoppingCart className="h-4 w-4" />
             Orders
+            {orderCount > 0 && (
+              <span className="absolute -top-2 -right-3 flex items-center justify-center min-w-[18px] h-[18px] rounded-full bg-red-500 text-white text-[10px] font-bold px-1 shadow-md animate-in fade-in zoom-in">
+                {orderCount}
+              </span>
+            )}
           </Link>
         </div>
       </div>
@@ -242,6 +303,20 @@ export function ShopItemDetail() {
               </div>
             </div>
 
+            {/* Description */}
+            {item.description && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Description
+                </p>
+                <div className="max-h-24 overflow-y-auto rounded-lg bg-gray-50 px-3 py-2 border border-gray-100 scrollbar-thin">
+                  <p className="text-sm text-gray-600 leading-relaxed whitespace-pre-line">
+                    {item.description}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Option groups */}
             {item.optionGroups?.length > 0 && (
               <div className="space-y-3 pt-1">
@@ -256,7 +331,9 @@ export function ShopItemDetail() {
                         setSelectedOptions({ ...selectedOptions, [group.id]: v })
                       }
                     >
-                      <SelectTrigger className="mt-1.5 rounded-xl border-gray-200 bg-gray-50/80 focus:bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all h-11">
+                      <SelectTrigger className={`mt-1.5 rounded-xl bg-gray-50/80 focus:bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all h-11 ${
+                        !selectedOptions[group.id] ? 'border-red-300 ring-1 ring-red-200' : 'border-gray-200'
+                      }`}>
                         <SelectValue placeholder={`Select ${group.name}`} />
                       </SelectTrigger>
                       <SelectContent>
@@ -319,23 +396,94 @@ export function ShopItemDetail() {
             )}
 
             {/* Actions */}
-            <div className="flex items-center gap-2 pt-1">
-              <Button
-                variant="outline"
-                onClick={handleChangeItem}
-                className="flex-1 rounded-xl h-11 border-gray-200 hover:bg-gray-50 font-medium text-sm"
-              >
-                Change item
-              </Button>
+            {item.optionGroups?.length > 0 && item.optionGroups.some((g: any) => !selectedOptions[g.id]) && (
+              <p className="text-xs text-red-500 font-medium text-center">
+                Please select all options above to continue
+              </p>
+            )}
 
-              <Button
-                className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all"
-                onClick={handleChooseLoanProduct}
-              >
-                Choose loan product
-                <ChevronRight className="h-4 w-4 ml-1" />
-              </Button>
-            </div>
+            {(() => {
+              const optionsIncomplete = item.optionGroups?.length > 0 && item.optionGroups.some((g: any) => !selectedOptions[g.id]);
+              const sellingOption = item.sellingOption || 'BNPL_ONLY';
+
+              if (sellingOption === 'BOTH') {
+                return (
+                  <div className="space-y-3 pt-1">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">Choose payment method</p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={handleChangeItem}
+                        className="rounded-xl h-11 border-gray-200 hover:bg-gray-50 font-medium text-sm px-4"
+                      >
+                        Change item
+                      </Button>
+                      <Button
+                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handleChooseLoanProduct}
+                        disabled={optionsIncomplete}
+                      >
+                        <CreditCard className="h-4 w-4 mr-1.5" />
+                        BNPL
+                        <ChevronRight className="h-4 w-4 ml-1" />
+                      </Button>
+                      <Button
+                        className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handlePlaceDirectOrder}
+                        disabled={optionsIncomplete || placingOrder}
+                      >
+                        <Banknote className="h-4 w-4 mr-1.5" />
+                        {placingOrder ? 'Placing...' : 'Direct Pay'}
+                      </Button>
+                    </div>
+                  </div>
+                );
+              }
+
+              if (sellingOption === 'DIRECT_ONLY') {
+                return (
+                  <div className="flex items-center gap-2 pt-1">
+                    <Button
+                      variant="outline"
+                      onClick={handleChangeItem}
+                      className="flex-1 rounded-xl h-11 border-gray-200 hover:bg-gray-50 font-medium text-sm"
+                    >
+                      Change item
+                    </Button>
+                    <Button
+                      className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                      onClick={handlePlaceDirectOrder}
+                      disabled={optionsIncomplete || placingOrder}
+                    >
+                      <Banknote className="h-4 w-4 mr-1.5" />
+                      {placingOrder ? 'Placing order...' : 'Place order'}
+                      {!placingOrder && <ChevronRight className="h-4 w-4 ml-1" />}
+                    </Button>
+                  </div>
+                );
+              }
+
+              // Default: BNPL_ONLY
+              return (
+                <div className="flex items-center gap-2 pt-1">
+                  <Button
+                    variant="outline"
+                    onClick={handleChangeItem}
+                    className="flex-1 rounded-xl h-11 border-gray-200 hover:bg-gray-50 font-medium text-sm"
+                  >
+                    Change item
+                  </Button>
+                  <Button
+                    className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={handleChooseLoanProduct}
+                    disabled={optionsIncomplete}
+                  >
+                    Choose loan product
+                    <ChevronRight className="h-4 w-4 ml-1" />
+                  </Button>
+                </div>
+              );
+            })()}
           </CardContent>
         </Card>
       </div>

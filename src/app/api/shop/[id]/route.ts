@@ -7,7 +7,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     const item = await prisma.item.findUnique({
       where: { id, status: 'ACTIVE' },
       include: {
-        merchant: { select: { id: true, name: true, status: true } },
+        merchant: { select: { id: true, name: true, status: true, bnplEnabled: true } },
         category: { select: { id: true, name: true } },
         variants: { where: { status: 'ACTIVE' }, orderBy: { createdAt: 'asc' } },
         optionGroups: { include: { values: true }, orderBy: { createdAt: 'asc' } },

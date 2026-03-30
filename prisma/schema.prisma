@@ -283,7 +283,7 @@ model LoanApplication {
   status            String             @default("PENDING_DOCUMENTS") // PENDING_DOCUMENTS, PENDING_REVIEW, NEEDS_REVISION, APPROVED, DISBURSED
   rejectionReason   String?            @db.Text
   loan              Loan?
-  order             Order?
+  orders            Order[]
   uploadedDocuments UploadedDocument[]
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
@@ -756,14 +756,21 @@ model Branch {
 }
 
 model Merchant {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  status    String   @default("PENDING_APPROVAL")
-  items     Item[]
-  orders    Order[]
-  users     User[]
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  name                  String   @unique
+  accountNumber         String?  @unique
+  iconUrl               String?  @db.Text
+  contactPersonName     String?
+  contactPersonPhone    String?
+  contactPersonEmail    String?
+  additionalContactInfo String?  @db.Text
+  bnplEnabled           Boolean  @default(true)
+  status                String   @default("PENDING_APPROVAL")
+  items                 Item[]
+  orders                Order[]
+  users                 User[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 model ProductCategory {
@@ -788,6 +795,7 @@ model Item {
   imageUrl        String?          @db.Text
   videoUrl        String?          @db.Text
   currency        String           @default("ETB")
+  sellingOption   String           @default("BNPL_ONLY")
   status          String           @default("ACTIVE")
   stockQuantity   Int              @default(0)
   variants        ItemVariant[]
@@ -871,9 +879,10 @@ model Order {
   borrower          Borrower         @relation(fields: [borrowerId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   merchantId        String
   merchant          Merchant         @relation(fields: [merchantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  loanApplicationId String?          @unique
+  loanApplicationId String?
   loanApplication   LoanApplication? @relation(fields: [loanApplicationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   loanId            String?
+  paymentType       String           @default("BNPL")
   status            String           @default("PENDING_MERCHANT_CONFIRMATION")
   cancelReason      String?
   cancelledBy       String?

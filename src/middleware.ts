@@ -67,7 +67,7 @@ const protectedAdminRoutes = [
 ];
 const publicRoutes = ['/admin/login', '/loan/connect', '/admin/change-password'];
 
-const protectedMiniAppRoutes = ['/loan', '/dashboard', '/history', '/shop', '/bnpl'];
+const protectedMiniAppRoutes = ['/loan', '/dashboard', '/history', '/bnpl'];
 const publicMiniAppRoutes = ['/loan/connect'];
 
 export const config = {
@@ -111,9 +111,7 @@ export const config = {
     '/history',
     '/history/:path*',
 
-    // BNPL shop and order pages + APIs
-    '/shop',
-    '/shop/:path*',
+    // BNPL order pages + APIs
     '/bnpl',
     '/bnpl/:path*',
     '/api/bnpl/:path*',

@@ -114,12 +114,13 @@ export default function MerchantOrdersPage() {
                 <TableHead>Borrower</TableHead>
                 <TableHead>Merchant</TableHead>
                 <TableHead>Total</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orders.length === 0 && <TableRow><TableCell colSpan={9} className="text-center text-muted-foreground py-8">No orders yet.</TableCell></TableRow>}
+              {orders.length === 0 && <TableRow><TableCell colSpan={10} className="text-center text-muted-foreground py-8">No orders yet.</TableCell></TableRow>}
               {orders.map(o => (
                 <TableRow key={o.id}>
                   <TableCell className="font-mono text-xs text-muted-foreground">{o.id}</TableCell>
@@ -144,6 +145,11 @@ export default function MerchantOrdersPage() {
                   <TableCell className="text-sm">{o.borrowerId}</TableCell>
                   <TableCell className="text-sm">{o.merchant?.name}</TableCell>
                   <TableCell className="text-sm font-medium whitespace-nowrap">{fmtCurr(o.totalAmount)} ETB</TableCell>
+                  <TableCell>
+                    <Badge className={o.paymentType === 'DIRECT' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-amber-100 text-amber-800 border-amber-300'} variant="outline">
+                      {o.paymentType === 'DIRECT' ? 'Direct' : 'BNPL'}
+                    </Badge>
+                  </TableCell>
                   <TableCell><Badge className={statusColor[o.status] || ''} variant="outline">{o.status}</Badge></TableCell>
                   <TableCell>
                     <div className="flex gap-2">

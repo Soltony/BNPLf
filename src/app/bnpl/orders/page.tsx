@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { ChevronDown, ChevronUp, XCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
 import {
@@ -16,6 +17,31 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+
+const MERCHANT_RESPONDED_STATUSES = ['PENDING_DELIVERY', 'ON_DELIVERY', 'CANCELLED'];
+
+const getSeenOrderResponsesKey = (borrowerId: string) => `bnpl_seen_order_responses:${borrowerId}`;
+
+const orderStatusTabs = [
+  {
+    value: 'active',
+    label: 'Active',
+    statuses: ['PENDING', 'PENDING_MERCHANT_CONFIRMATION', 'CONFIRMED', 'SHIPPED', 'PENDING_DELIVERY', 'ON_DELIVERY'],
+    empty: 'No active orders.',
+  },
+  {
+    value: 'delivered',
+    label: 'Delivered',
+    statuses: ['DELIVERED'],
+    empty: 'No delivered orders.',
+  },
+  {
+    value: 'cancelled',
+    label: 'Cancelled',
+    statuses: ['CANCELLED'],
+    empty: 'No cancelled orders.',
+  },
+] as const;
 
 const statusColor: Record<string, string> = {
   PENDING: 'bg-yellow-100 text-yellow-800 border-yellow-300',
@@ -32,7 +58,7 @@ import { Suspense } from 'react';
 function BnplOrdersPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const borrowerId = searchParams?.get('borrowerId') || '';
+  const borrowerId = searchParams?.get('borrowerId') || searchParams?.get('borrowerid') || '';
   const { toast } = useToast();
   const [orders, setOrders] = useState<any[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -41,6 +67,8 @@ function BnplOrdersPageInner() {
   const [cancelOrderId, setCancelOrderId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [cancelling, setCancelling] = useState(false);
+  const [activeTab, setActiveTab] = useState<(typeof orderStatusTabs)[number]['value']>('active');
+  const [seenOrderResponses, setSeenOrderResponses] = useState<Set<string>>(new Set());
 
   const load = () => {
     if (!borrowerId) return;
@@ -50,6 +78,36 @@ function BnplOrdersPageInner() {
   };
 
   useEffect(() => { load(); }, [borrowerId]);
+
+  useEffect(() => {
+    if (!borrowerId) return;
+    const stored = window.localStorage.getItem(getSeenOrderResponsesKey(borrowerId));
+    setSeenOrderResponses(new Set<string>(stored ? JSON.parse(stored) : []));
+  }, [borrowerId]);
+
+  useEffect(() => {
+    if (!borrowerId) return;
+    const tab = orderStatusTabs.find((entry) => entry.value === activeTab);
+    if (!tab) return;
+
+    const nextSeen = new Set(seenOrderResponses);
+    let changed = false;
+
+    for (const order of orders) {
+      if (!tab.statuses.includes(order.status)) continue;
+      if (!MERCHANT_RESPONDED_STATUSES.includes(order.status)) continue;
+      const signature = `${order.id}:${order.status}`;
+      if (!nextSeen.has(signature)) {
+        nextSeen.add(signature);
+        changed = true;
+      }
+    }
+
+    if (!changed) return;
+    const serialized = JSON.stringify(Array.from(nextSeen));
+    window.localStorage.setItem(getSeenOrderResponsesKey(borrowerId), serialized);
+    setSeenOrderResponses(nextSeen);
+  }, [activeTab, borrowerId, orders, seenOrderResponses]);
 
   // Auto-expand first order
   useEffect(() => {
@@ -66,6 +124,7 @@ function BnplOrdersPageInner() {
   const confirmDelivered = async (orderId: string) => {
     setConfirming(orderId);
     try {
+      const order = orders.find(o => o.id === orderId);
       const res = await fetch('/api/bnpl/orders', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -75,7 +134,13 @@ function BnplOrdersPageInner() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to confirm delivery');
       }
-      toast({ title: 'Delivery confirmed', description: 'Your order has been marked as delivered and the loan has been disbursed.' });
+      const isDirectPayment = order?.paymentType === 'DIRECT';
+      toast({
+        title: 'Delivery confirmed',
+        description: isDirectPayment
+          ? 'Your order has been marked as delivered. You can now proceed with payment.'
+          : 'Your order has been marked as delivered and the loan has been disbursed.',
+      });
       load();
     } catch (e: any) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
@@ -119,6 +184,149 @@ function BnplOrdersPageInner() {
     return first ? { name: first.item?.name || 'Item', imageUrl: first.item?.imageUrl } : { name: 'Order', imageUrl: null };
   };
 
+  const getOrdersForTab = (tabValue: (typeof orderStatusTabs)[number]['value']) => {
+    const tab = orderStatusTabs.find((entry) => entry.value === tabValue);
+    if (!tab) return orders;
+    return orders.filter((order) => tab.statuses.includes(order.status));
+  };
+
+  const getTabNotificationCount = (tabValue: (typeof orderStatusTabs)[number]['value']) => {
+    const tab = orderStatusTabs.find((entry) => entry.value === tabValue);
+    if (!tab) return 0;
+
+    return orders.filter((order) => {
+      if (!tab.statuses.includes(order.status)) return false;
+      if (!MERCHANT_RESPONDED_STATUSES.includes(order.status)) return false;
+      return !seenOrderResponses.has(`${order.id}:${order.status}`);
+    }).length;
+  };
+
+  const renderOrders = (tabValue: (typeof orderStatusTabs)[number]['value']) => {
+    const tabOrders = getOrdersForTab(tabValue);
+    const emptyMessage = orderStatusTabs.find((entry) => entry.value === tabValue)?.empty || 'No orders found.';
+
+    if (tabOrders.length === 0) {
+      return (
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            {emptyMessage}
+          </CardContent>
+        </Card>
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {tabOrders.map(o => {
+          const isOpen = expanded[o.id] || false;
+          const firstItem = getFirstItem(o);
+          return (
+            <Card key={o.id} className="overflow-hidden">
+              <button
+                onClick={() => toggle(o.id)}
+                className="w-full flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors text-left"
+              >
+                {firstItem.imageUrl && (
+                  <img
+                    src={firstItem.imageUrl}
+                    alt={firstItem.name}
+                    className="w-12 h-12 rounded-lg object-cover border"
+                  />
+                )}
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold truncate">{firstItem.name}</p>
+                  <Badge className={o.paymentType === 'DIRECT' ? 'bg-emerald-100 text-emerald-800 border-emerald-300 text-[10px]' : 'bg-amber-100 text-amber-800 border-amber-300 text-[10px]'} variant="outline">
+                    {o.paymentType === 'DIRECT' ? 'Direct Payment' : 'BNPL'}
+                  </Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold whitespace-nowrap">{fmtCurr(o.totalAmount)} ETB</span>
+                  {isOpen ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
+                </div>
+              </button>
+
+              {isOpen && (
+                <div className="border-t px-4 pb-4">
+                  <div className="pt-4 space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Status</span>
+                      <Badge className={statusColor[o.status] || ''} variant="outline">{o.status}</Badge>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Payment Type</span>
+                      <Badge className={o.paymentType === 'DIRECT' ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-amber-100 text-amber-800 border-amber-300'} variant="outline">
+                        {o.paymentType === 'DIRECT' ? 'Direct Payment' : 'BNPL'}
+                      </Badge>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Order ID</span>
+                      <span className="font-mono text-xs">{o.id}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Date</span>
+                      <span>{fmtDate(o.createdAt)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Merchant</span>
+                      <span>{o.merchant?.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Items</span>
+                      <span>
+                        {o.orderItems?.map((it: any) => (
+                          <span key={it.id}>{it.quantity}&times; {it.item?.name}</span>
+                        ))}
+                      </span>
+                    </div>
+                  </div>
+
+                  {o.status === 'CANCELLED' && o.cancelReason && (
+                    <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3">
+                      <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-red-700">Order Cancelled</p>
+                        <p className="text-xs text-red-600 mt-0.5">
+                          {o.cancelledBy === 'MERCHANT' ? 'Reason from merchant: ' : 'Reason: '}
+                          {o.cancelReason}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {o.status === 'ON_DELIVERY' && (
+                    <div className="mt-4 flex gap-2 justify-center">
+                      <Button
+                        onClick={() => confirmDelivered(o.id)}
+                        disabled={confirming === o.id}
+                        variant="outline"
+                        className="px-6"
+                      >
+                        {confirming === o.id ? 'Confirming...' : 'Confirm delivered'}
+                      </Button>
+                    </div>
+                  )}
+
+                  {o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && (
+                    <div className="mt-4 flex justify-center">
+                      <Button
+                        onClick={() => openCancelDialog(o.id)}
+                        variant="outline"
+                        className="px-6 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                      >
+                        <XCircle className="h-4 w-4 mr-1.5" />
+                        Cancel Order
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-2xl mx-auto px-4 py-8">
@@ -144,118 +352,34 @@ function BnplOrdersPageInner() {
           </CardHeader>
         </Card>
 
-        {orders.length === 0 && (
-          <Card>
-            <CardContent className="py-12 text-center text-muted-foreground">
-              No orders yet.
-            </CardContent>
-          </Card>
-        )}
-
-        <div className="space-y-4">
-          {orders.map(o => {
-            const isOpen = expanded[o.id] || false;
-            const firstItem = getFirstItem(o);
-            return (
-              <Card key={o.id} className="overflow-hidden">
-                {/* Summary header - always visible */}
-                <button
-                  onClick={() => toggle(o.id)}
-                  className="w-full flex items-center gap-4 p-4 hover:bg-gray-50 transition-colors text-left"
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as (typeof orderStatusTabs)[number]['value'])} className="w-full">
+          <TabsList className="mb-4 flex h-auto w-full gap-2 overflow-x-auto bg-transparent p-0">
+            {orderStatusTabs.map((tab) => {
+              const count = getOrdersForTab(tab.value).length;
+              const notificationCount = getTabNotificationCount(tab.value);
+              return (
+                <TabsTrigger
+                  key={tab.value}
+                  value={tab.value}
+                  className="relative shrink-0 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 data-[state=active]:border-amber-500 data-[state=active]:bg-amber-500 data-[state=active]:text-white"
                 >
-                  {firstItem.imageUrl && (
-                    <img
-                      src={firstItem.imageUrl}
-                      alt={firstItem.name}
-                      className="w-12 h-12 rounded-lg object-cover border"
-                    />
+                  {tab.label} ({count})
+                  {notificationCount > 0 && (
+                    <span className="ml-2 inline-flex min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold text-white data-[state=active]:bg-white data-[state=active]:text-red-500">
+                      {notificationCount}
+                    </span>
                   )}
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold truncate">{firstItem.name}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold whitespace-nowrap">{fmtCurr(o.totalAmount)} ETB</span>
-                    {isOpen ? <ChevronUp className="h-5 w-5 text-muted-foreground" /> : <ChevronDown className="h-5 w-5 text-muted-foreground" />}
-                  </div>
-                </button>
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
 
-                {/* Expanded details */}
-                {isOpen && (
-                  <div className="border-t px-4 pb-4">
-                    <div className="pt-4 space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Status</span>
-                        <Badge className={statusColor[o.status] || ''} variant="outline">{o.status}</Badge>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Order ID</span>
-                        <span className="font-mono text-xs">{o.id}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Date</span>
-                        <span>{fmtDate(o.createdAt)}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Merchant</span>
-                        <span>{o.merchant?.name}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-muted-foreground">Items</span>
-                        <span>
-                          {o.orderItems?.map((it: any) => (
-                            <span key={it.id}>{it.quantity}&times; {it.item?.name}</span>
-                          ))}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Cancelled by merchant - show reason */}
-                    {o.status === 'CANCELLED' && o.cancelReason && (
-                      <div className="mt-3 flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg p-3">
-                        <AlertTriangle className="h-4 w-4 text-red-500 mt-0.5 shrink-0" />
-                        <div>
-                          <p className="text-sm font-medium text-red-700">Order Cancelled</p>
-                          <p className="text-xs text-red-600 mt-0.5">
-                            {o.cancelledBy === 'MERCHANT' ? 'Reason from merchant: ' : 'Reason: '}
-                            {o.cancelReason}
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Confirm delivered button - only for ON_DELIVERY orders */}
-                    {o.status === 'ON_DELIVERY' && (
-                      <div className="mt-4 flex gap-2 justify-center">
-                        <Button
-                          onClick={() => confirmDelivered(o.id)}
-                          disabled={confirming === o.id}
-                          variant="outline"
-                          className="px-6"
-                        >
-                          {confirming === o.id ? 'Confirming...' : 'Confirm delivered'}
-                        </Button>
-                      </div>
-                    )}
-
-                    {/* Cancel button - for non-delivered, non-cancelled orders */}
-                    {o.status !== 'DELIVERED' && o.status !== 'CANCELLED' && (
-                      <div className="mt-4 flex justify-center">
-                        <Button
-                          onClick={() => openCancelDialog(o.id)}
-                          variant="outline"
-                          className="px-6 text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
-                        >
-                          <XCircle className="h-4 w-4 mr-1.5" />
-                          Cancel Order
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
+          {orderStatusTabs.map((tab) => (
+            <TabsContent key={tab.value} value={tab.value} className="mt-0">
+              {renderOrders(tab.value)}
+            </TabsContent>
+          ))}
+        </Tabs>
 
         {/* Cancel confirmation dialog */}
         <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>

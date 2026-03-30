@@ -333,13 +333,32 @@ export async function PUT(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { borrowerId, merchantId, productId, loanAmount, creditAccount, items } = body;
+    const { borrowerId, merchantId, productId, loanAmount, creditAccount, items, paymentType } = body;
+    const isDirectPayment = paymentType === 'DIRECT';
 
     if (!borrowerId || !merchantId || !items?.length) {
+      console.error('[api/bnpl/orders] Missing required order fields', {
+        borrowerId: borrowerId ?? null,
+        merchantId: merchantId ?? null,
+        productId: productId ?? null,
+        loanAmount: loanAmount ?? null,
+        creditAccount: creditAccount ?? null,
+        itemCount: Array.isArray(items) ? items.length : 0,
+        body,
+      });
       return NextResponse.json({ error: 'borrowerId, merchantId, and items are required' }, { status: 400 });
     }
 
-    if (!productId || !loanAmount) {
+    if (!isDirectPayment && (!productId || !loanAmount)) {
+      console.error('[api/bnpl/orders] Missing required BNPL financing fields', {
+        borrowerId,
+        merchantId,
+        productId: productId ?? null,
+        loanAmount: loanAmount ?? null,
+        creditAccount: creditAccount ?? null,
+        itemCount: Array.isArray(items) ? items.length : 0,
+        body,
+      });
       return NextResponse.json({ error: 'productId and loanAmount are required for BNPL orders' }, { status: 400 });
     }
 
@@ -350,16 +369,19 @@ export async function POST(req: NextRequest) {
       create: { id: borrowerId },
     });
 
-    // ── Create a LoanApplication with PENDING_DELIVERY status ──
+    // ── Create a LoanApplication with PENDING_DELIVERY status (BNPL only) ──
     // No loan is created yet — that happens on delivery confirmation.
-    const loanApplication = await prisma.loanApplication.create({
-      data: {
-        borrowerId,
-        productId,
-        loanAmount,
-        status: 'PENDING_DELIVERY',
-      },
-    });
+    let loanApplication: any = null;
+    if (!isDirectPayment) {
+      loanApplication = await prisma.loanApplication.create({
+        data: {
+          borrowerId,
+          productId,
+          loanAmount,
+          status: 'PENDING_DELIVERY',
+        },
+      });
+    }
 
     let totalAmount = 0;
     const orderItemsData: any[] = [];
@@ -443,8 +465,9 @@ export async function POST(req: NextRequest) {
       data: {
         borrowerId,
         merchantId,
-        loanApplicationId: loanApplication.id,
+        loanApplicationId: loanApplication?.id || null,
         totalAmount: Math.max(0, totalAmount),
+        paymentType: isDirectPayment ? 'DIRECT' : 'BNPL',
         status: 'PENDING_MERCHANT_CONFIRMATION',
         orderItems: { create: orderItemsData },
       },

@@ -96,7 +96,13 @@ export async function GET(req: NextRequest) {
       orderBy: { name: 'asc' },
     });
 
-    return NextResponse.json({ items: itemsWithDiscounts, categories });
+    const merchants = await prisma.merchant.findMany({
+      where: { status: 'ACTIVE' },
+      select: { id: true, name: true, iconUrl: true, bnplEnabled: true },
+      orderBy: { name: 'asc' },
+    });
+
+    return NextResponse.json({ items: itemsWithDiscounts, categories, merchants });
   } catch (error) {
     console.error('Error fetching shop items:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

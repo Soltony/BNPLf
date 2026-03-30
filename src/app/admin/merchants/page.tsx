@@ -58,6 +58,7 @@ export default function MerchantsPage() {
             <TableHead>Merchant</TableHead>
             <TableHead>Category</TableHead>
             <TableHead>Price</TableHead>
+            <TableHead>Selling Option</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -69,6 +70,15 @@ export default function MerchantsPage() {
               <TableCell>{item.merchant?.name || '-'}</TableCell>
               <TableCell>{item.category?.name || '-'}</TableCell>
               <TableCell>{formatCurrency(item.price)}</TableCell>
+              <TableCell>
+                <Badge variant="outline" className={
+                  item.sellingOption === 'DIRECT_ONLY' ? 'bg-emerald-50 text-emerald-700 border-emerald-300' :
+                  item.sellingOption === 'BOTH' ? 'bg-blue-50 text-blue-700 border-blue-300' :
+                  'bg-amber-50 text-amber-700 border-amber-300'
+                }>
+                  {item.sellingOption === 'DIRECT_ONLY' ? 'Direct Only' : item.sellingOption === 'BOTH' ? 'BNPL + Direct' : 'BNPL Only'}
+                </Badge>
+              </TableCell>
               <TableCell><Badge variant="outline">{item.status}</Badge></TableCell>
               <TableCell className="text-right space-x-2">
                 <Link href={`/admin/merchants/items/${item.id}`}>
@@ -85,7 +95,7 @@ export default function MerchantsPage() {
             </TableRow>
           ))}
           {items.length === 0 && (
-            <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">No items found.</TableCell></TableRow>
+            <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">No items found.</TableCell></TableRow>
           )}
         </TableBody>
       </Table>

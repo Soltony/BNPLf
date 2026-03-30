@@ -34,6 +34,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
   const [description, setDescription] = useState('');
   const [price, setPrice] = useState('');
   const [status, setStatus] = useState('ACTIVE');
+  const [sellingOption, setSellingOption] = useState('BNPL_ONLY');
   const [imageUrl, setImageUrl] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -52,7 +53,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
       fetch('/api/branches/locations').then(r => r.json()),
       fetch(`/api/inventory?itemId=${id}`).then(r => r.json()),
     ]).then(([m, c, item, locs, inventory]) => {
-      setMerchants(m.filter?.((x: any) => x.status === 'ACTIVE') || []);
+      setMerchants(Array.isArray(m) ? m : []);
       setCategories(c.filter?.((x: any) => x.status === 'ACTIVE') || []);
       setLocations(locs.filter?.((x: any) => x.status === 'ACTIVE') || []);
 
@@ -63,6 +64,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
         setDescription(item.description || '');
         setPrice(String(item.price || ''));
         setStatus(item.status || 'ACTIVE');
+        setSellingOption(item.sellingOption || 'BNPL_ONLY');
         setImageUrl(item.imageUrl || '');
         setVideoUrl(item.videoUrl || '');
 
@@ -224,6 +226,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
           imageUrl: newImageUrl || null,
           videoUrl: videoUrl || null,
           status,
+          sellingOption,
           optionGroups: optionGroups.length > 0 ? optionGroups : [],
         }),
       });
@@ -305,6 +308,17 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
               <Select value={status} onValueChange={setStatus}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="ACTIVE">ACTIVE</SelectItem><SelectItem value="INACTIVE">INACTIVE</SelectItem></SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Selling Option</Label>
+              <Select value={sellingOption} onValueChange={setSellingOption}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="BNPL_ONLY">BNPL Only</SelectItem>
+                  <SelectItem value="DIRECT_ONLY">Direct Payment Only</SelectItem>
+                  <SelectItem value="BOTH">Both (BNPL + Direct)</SelectItem>
+                </SelectContent>
               </Select>
             </div>
             <div>
