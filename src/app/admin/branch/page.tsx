@@ -78,6 +78,7 @@ export default function BranchPage() {
   const [muEditEmail, setMuEditEmail] = useState('');
   const [muEditPhone, setMuEditPhone] = useState('');
   const [muEditStatus, setMuEditStatus] = useState('Active');
+  const [muEditMerchantId, setMuEditMerchantId] = useState('');
   const [muEditErrors, setMuEditErrors] = useState<Record<string, string | null>>({});
 
   // Merchant user form - validation
@@ -332,6 +333,7 @@ export default function BranchPage() {
           email: muEditEmail,
           phoneNumber: muEditPhone,
           status: muEditStatus,
+          merchantId: muEditMerchantId || null,
         }),
       });
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed to update user'); }
@@ -644,7 +646,7 @@ export default function BranchPage() {
                       <TableCell>{u.fullName}</TableCell>
                       <TableCell>{u.email}</TableCell>
                       <TableCell>{u.phoneNumber}</TableCell>
-                      <TableCell>{u.providerName || '-'}</TableCell>
+                      <TableCell>{u.merchantName || u.providerName || '-'}</TableCell>
                       <TableCell>{u.role}</TableCell>
                       <TableCell className="space-x-2">
                         <Button size="sm" variant="outline" onClick={() => {
@@ -653,6 +655,7 @@ export default function BranchPage() {
                           setMuEditEmail(u.email);
                           setMuEditPhone(u.phoneNumber);
                           setMuEditStatus(u.status || 'Active');
+                          setMuEditMerchantId(u.merchantId || '');
                           setMuEditErrors({});
                           setMuEditDialogOpen(true);
                         }}>
@@ -691,6 +694,15 @@ export default function BranchPage() {
             <DialogContent>
               <DialogHeader><DialogTitle>Edit Merchant User</DialogTitle></DialogHeader>
               <div className="space-y-4">
+                <div>
+                  <Label>Associate Merchant</Label>
+                  <Select value={muEditMerchantId} onValueChange={setMuEditMerchantId}>
+                    <SelectTrigger><SelectValue placeholder="Select merchant" /></SelectTrigger>
+                    <SelectContent>
+                      {allMerchants.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <div>
                   <Label>Full Name <span className="text-red-500">*</span></Label>
                   <Input value={muEditFullName} onChange={e => { setMuEditFullName(e.target.value); setMuEditErrors(prev => ({ ...prev, fullName: null })); }} />

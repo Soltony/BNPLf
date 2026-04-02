@@ -39,7 +39,6 @@ export const allMenuItems: MenuItem[] = [
     label: 'Merchant Dashboard',
     icon: LayoutDashboard,
     roles: ['Merchant'],
-    permissionKey: 'merchants',
   },
   {
     path: '/admin',

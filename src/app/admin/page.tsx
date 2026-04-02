@@ -14,8 +14,9 @@ export default async function AdminRootPage() {
         return redirect('/admin/login');
     }
 
-    // Merchant users go directly to their merchant dashboard
-    if (user.merchantId) {
+    const hasMerchantDashboardAccess = user.permissions['merchant-dashboard']?.read;
+
+    if (user.merchantId && hasMerchantDashboardAccess) {
         return redirect('/admin/merchant-dashboard');
     }
 

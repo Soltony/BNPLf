@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import bcrypt from 'bcryptjs';
 import { getUserFromSession } from '@/lib/user';
 import { createAuditLog } from '@/lib/audit-log';
+import { sendSms } from '@/lib/sms';
 
 export async function GET(req: NextRequest) {
   const user = await getUserFromSession();
@@ -93,6 +94,13 @@ export async function POST(req: NextRequest) {
       entity: 'User',
       entityId: newUser.id,
       details: JSON.stringify({ email, branchId }),
+    });
+
+    // Send SMS with login credentials
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.CALLBACK_URL?.replace(/\/api\/.*$/, '') || 'https://nibteraloan.nibbank.com.et';
+    const smsText = `Welcome to NIB BNPL. Your account has been created.\nLogin: ${appUrl}/admin/login\nEmail: ${email.trim().toLowerCase()}\nPassword: ${rawPassword}\nPlease change your password on first login.`;
+    sendSms(phoneNumber.trim(), smsText).catch((err: any) => {
+      console.error('[branch-user] SMS send failed:', err);
     });
 
     return NextResponse.json(

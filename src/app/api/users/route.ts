@@ -10,6 +10,7 @@ import { isBlocked, recordFailedAttempt, resetAttempts, getRemainingAttempts, ge
 import { createAuditLog } from '@/lib/audit-log';
 import { getUserFromSession } from '@/lib/user';
 import { revokeAllUserSessions } from '@/lib/session';
+import { sendSms } from '@/lib/sms';
 
 const userSchema = z.object({
   fullName: z.string().min(1, 'Full name is required'),
@@ -19,6 +20,7 @@ const userSchema = z.object({
   password: z.string().optional(),
   role: z.string(), // Role name, will be connected by ID
   providerId: z.string().nullable().optional(),
+  merchantId: z.string().nullable().optional(),
   status: z.enum(['Active', 'Inactive']),
 });
 
@@ -44,6 +46,7 @@ export async function GET() {
       include: {
         role: true,
         loanProvider: true,
+        merchant: true,
       },
       orderBy: {
         createdAt: 'desc',
@@ -58,6 +61,8 @@ export async function GET() {
       role: user.role.name,
       providerName: user.loanProvider?.name || 'N/A',
       providerId: user.loanProvider?.id,
+      merchantId: user.merchantId,
+      merchantName: user.merchant?.name || null,
       status: user.status,
     }));
 
@@ -88,7 +93,7 @@ export async function POST(req: NextRequest) {
   try {
 
     const body = await req.json();
-    const { password, role: roleName, providerId, ...userData } = userSchema.parse(body);
+    const { password, role: roleName, providerId, merchantId, ...userData } = userSchema.parse(body);
     // Validate password with the stronger shared password rules (includes breach check)
     try {
       // Use the exported `passwordSchema` which includes the async HaveIBeenPwned check.
@@ -151,6 +156,11 @@ export async function POST(req: NextRequest) {
         }
     }
 
+    // Assign merchantId if provided (for merchant-role users)
+    if (merchantId) {
+      dataToCreate.merchantId = merchantId;
+    }
+
 
     const newUser = await prisma.user.create({
       data: dataToCreate,
@@ -161,6 +171,15 @@ export async function POST(req: NextRequest) {
 
     const successLogDetails = { createdUserId: newUser.id, createdUserEmail: newUser.email, assignedRole: roleName };
     await createAuditLog({ actorId: user.id, action: 'USER_CREATE_SUCCESS', entity: 'USER', entityId: newUser.id, details: successLogDetails, ipAddress, userAgent });
+
+    // Send SMS with login credentials for merchant-role users
+    if (roleName === 'Merchant' && password && userData.phoneNumber) {
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.CALLBACK_URL?.replace(/\/api\/.*$/, '') || 'https://nibteraloan.nibbank.com.et';
+      const smsText = `Welcome to NIB BNPL. Your merchant account has been created.\nLogin: ${appUrl}/admin/login\nEmail: ${userData.email}\nPassword: ${password}\nPlease change your password on first login.`;
+      sendSms(userData.phoneNumber, smsText).catch((err: any) => {
+        console.error('[merchant-user] SMS send failed:', err);
+      });
+    }
 
 
     // Never return password hashes (or other auth secrets) in API responses.
@@ -210,7 +229,7 @@ export async function PUT(req: NextRequest) {
   try {
 
     const body = await req.json();
-    const { id, role: roleName, providerId, password, ...userData } = body;
+    const { id, role: roleName, providerId, merchantId, password, ...userData } = body;
 
     if (!id) {
         throw new Error('User ID is required for an update.');
@@ -288,6 +307,10 @@ export async function PUT(req: NextRequest) {
         dataToUpdate.loanProviderId = providerId;
     }
 
+    // Handle merchantId relationship
+    if (merchantId !== undefined) {
+      dataToUpdate.merchantId = merchantId || null;
+    }
 
     const updatedUser = await prisma.user.update({
       where: { id },

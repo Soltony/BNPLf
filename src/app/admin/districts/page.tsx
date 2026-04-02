@@ -95,6 +95,10 @@ export default function DistrictsPage() {
   const [branchUserDialogOpen, setBranchUserDialogOpen] = useState(false);
   const [buEditBranchId, setBuEditBranchId] = useState('');
   const [buEditDistrictId, setBuEditDistrictId] = useState('');
+  const [buEditFullName, setBuEditFullName] = useState('');
+  const [buEditEmail, setBuEditEmail] = useState('');
+  const [buEditPhone, setBuEditPhone] = useState('');
+  const [buEditStatus, setBuEditStatus] = useState('Active');
 
   const [loading, setLoading] = useState(false);
 
@@ -369,7 +373,14 @@ export default function DistrictsPage() {
       const res = await fetch('/api/districts/branch-users', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: editingBranchUser.id, branchId: buEditBranchId }),
+        body: JSON.stringify({
+          id: editingBranchUser.id,
+          branchId: buEditBranchId,
+          fullName: buEditFullName,
+          email: buEditEmail,
+          phoneNumber: buEditPhone,
+          status: buEditStatus,
+        }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -980,6 +991,10 @@ export default function DistrictsPage() {
                           onClick={() => {
                             setEditingBranchUser(u);
                             setBuEditBranchId(u.branchId || '');
+                            setBuEditFullName(u.fullName);
+                            setBuEditEmail(u.email);
+                            setBuEditPhone(u.phoneNumber);
+                            setBuEditStatus(u.status);
                             // Find the district for the current branch
                             const currentBranch = allBranches.find(b => b.id === u.branchId);
                             setBuEditDistrictId(currentBranch?.districtId || '');
@@ -1036,9 +1051,33 @@ export default function DistrictsPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reassign Branch — {editingBranchUser?.fullName}</DialogTitle>
+            <DialogTitle>Edit Branch User — {editingBranchUser?.fullName}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
+            <div>
+              <Label>Full Name <span className="text-red-500">*</span></Label>
+              <Input value={buEditFullName} onChange={(e) => setBuEditFullName(e.target.value)} placeholder="Full name" />
+            </div>
+            <div>
+              <Label>Email <span className="text-red-500">*</span></Label>
+              <Input type="email" value={buEditEmail} onChange={(e) => setBuEditEmail(e.target.value)} placeholder="Email address" />
+            </div>
+            <div>
+              <Label>Phone Number <span className="text-red-500">*</span></Label>
+              <Input value={buEditPhone} onChange={(e) => setBuEditPhone(e.target.value)} placeholder="Phone number" />
+            </div>
+            <div>
+              <Label>Status</Label>
+              <Select value={buEditStatus} onValueChange={setBuEditStatus}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Active">Active</SelectItem>
+                  <SelectItem value="Inactive">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div>
               <Label>District</Label>
               <Select value={buEditDistrictId} onValueChange={(val) => { setBuEditDistrictId(val); setBuEditBranchId(''); }}>
@@ -1073,7 +1112,7 @@ export default function DistrictsPage() {
               <Button variant="outline" onClick={() => setBranchUserDialogOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleUpdateBranchUser} disabled={loading || !buEditBranchId}>
+              <Button onClick={handleUpdateBranchUser} disabled={loading || !buEditBranchId || !buEditFullName || !buEditEmail || !buEditPhone}>
                 {loading ? 'Saving...' : 'Save'}
               </Button>
             </div>
