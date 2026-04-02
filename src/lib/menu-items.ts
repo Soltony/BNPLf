@@ -35,6 +35,13 @@ export interface MenuItem {
 
 export const allMenuItems: MenuItem[] = [
   {
+    path: '/admin/merchant-dashboard',
+    label: 'Merchant Dashboard',
+    icon: LayoutDashboard,
+    roles: ['Merchant'],
+    permissionKey: 'merchants',
+  },
+  {
     path: '/admin',
     label: 'Dashboard',
     icon: LayoutDashboard,

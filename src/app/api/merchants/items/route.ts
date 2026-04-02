@@ -51,52 +51,42 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, variants, optionGroups } = body;
+    let { merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, variants, optionGroups } = body;
+
+    // Merchant users can only create items for their own merchant
+    if (user.merchantId) merchantId = user.merchantId;
 
     if (!merchantId || !categoryId || !name || price == null) {
       return NextResponse.json({ error: 'merchantId, categoryId, name, and price are required' }, { status: 400 });
     }
 
-    const item = await prisma.item.create({
+    const pending = await prisma.pendingChange.create({
       data: {
-        merchantId,
-        categoryId,
-        name,
-        description: description || null,
-        price: parseFloat(price),
-        imageUrl: imageUrl || null,
-        videoUrl: videoUrl || null,
-        status: status || 'ACTIVE',
-        sellingOption: sellingOption || 'BNPL_ONLY',
-        variants: variants?.length ? {
-          create: variants.map((v: any) => ({
-            name: v.name,
-            size: v.size || null,
-            color: v.color || null,
-            material: v.material || null,
-            price: parseFloat(v.price),
-            status: v.status || 'ACTIVE',
-          })),
-        } : undefined,
-        optionGroups: optionGroups?.length ? {
-          create: optionGroups.map((g: any) => ({
-            name: g.name,
-            values: g.values?.length ? {
-              create: g.values.map((v: any) => ({
-                label: v.label,
-                priceDelta: parseFloat(v.priceDelta || '0'),
-              })),
-            } : undefined,
-          })),
-        } : undefined,
+        entityType: 'MerchantItem',
+        changeType: 'CREATE',
+        payload: JSON.stringify({
+          created: {
+            merchantId,
+            categoryId,
+            name,
+            description: description || null,
+            price: parseFloat(price),
+            imageUrl: imageUrl || null,
+            videoUrl: videoUrl || null,
+            status: status || 'ACTIVE',
+            sellingOption: sellingOption || 'BNPL_ONLY',
+            variants: variants || [],
+            optionGroups: optionGroups || [],
+          },
+        }),
+        createdById: user.id,
       },
-      include: { merchant: true, category: true, variants: true, optionGroups: { include: { values: true } } },
     });
 
-    await createAuditLog({ actorId: user.id, action: 'CREATE_ITEM', entity: 'Item', entityId: item.id, details: JSON.stringify({ name, merchantId }) });
-    return NextResponse.json(item, { status: 201 });
+    await createAuditLog({ actorId: user.id, action: 'CREATE_ITEM_REQUEST', entity: 'Item', details: JSON.stringify({ name, merchantId }) });
+    return NextResponse.json(pending, { status: 201 });
   } catch (error) {
-    console.error('Error creating item:', error);
+    console.error('Error creating item request:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
@@ -112,100 +102,46 @@ export async function PUT(req: NextRequest) {
     const { id, merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, variants, optionGroups } = body;
     if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
 
-    let optionGroupsChanged = false;
-    if (optionGroups) {
-      const existingOptionGroups = await prisma.itemOptionGroup.findMany({
-        where: { itemId: id },
-        include: { values: true },
-      });
+    const existing = await prisma.item.findUnique({
+      where: { id },
+      include: { merchant: true, category: true, variants: true, optionGroups: { include: { values: true } } },
+    });
+    if (!existing) return NextResponse.json({ error: 'Item not found' }, { status: 404 });
 
-      const existingNormalized = normalizeOptionGroups(existingOptionGroups);
-      const submittedNormalized = normalizeOptionGroups(optionGroups);
-      optionGroupsChanged = JSON.stringify(existingNormalized) !== JSON.stringify(submittedNormalized);
-
-      if (optionGroupsChanged) {
-        const linkedSelectionsCount = await prisma.orderItemOptionSelection.count({
-          where: {
-            optionValue: {
-              group: { itemId: id },
-            },
-          },
-        });
-
-        if (linkedSelectionsCount > 0) {
-          return NextResponse.json(
-            {
-              error: 'Cannot modify item attributes because they are already used in existing orders. You can still update selling option, status, pricing, and other non-attribute fields.',
-            },
-            { status: 400 }
-          );
-        }
-      }
+    // Merchant users can only update their own items
+    if (user.merchantId && existing.merchantId !== user.merchantId) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
-    // Update the item
-    const updated = await prisma.item.update({
-      where: { id },
+    const pending = await prisma.pendingChange.create({
       data: {
-        ...(merchantId && { merchantId }),
-        ...(categoryId && { categoryId }),
-        ...(name && { name }),
-        description: description ?? undefined,
-        ...(price != null && { price: parseFloat(price) }),
-        imageUrl: imageUrl ?? undefined,
-        videoUrl: videoUrl ?? undefined,
-        ...(status && { status }),
-        ...(sellingOption && { sellingOption }),
-      },
-      include: { merchant: true, category: true, variants: true, optionGroups: { include: { values: true } } },
-    });
-
-    // If variants provided, replace them
-    if (variants) {
-      await prisma.itemVariant.deleteMany({ where: { itemId: id } });
-      if (variants.length > 0) {
-        await prisma.itemVariant.createMany({
-          data: variants.map((v: any) => ({
-            itemId: id,
-            name: v.name,
-            size: v.size || null,
-            color: v.color || null,
-            material: v.material || null,
-            price: parseFloat(v.price),
-            status: v.status || 'ACTIVE',
-          })),
-        });
-      }
-    }
-
-    // If option groups provided and changed, replace them
-    if (optionGroups && optionGroupsChanged) {
-      await prisma.itemOptionGroup.deleteMany({ where: { itemId: id } });
-      for (const g of optionGroups) {
-        await prisma.itemOptionGroup.create({
-          data: {
-            itemId: id,
-            name: g.name,
-            values: g.values?.length ? {
-              create: g.values.map((v: any) => ({
-                label: v.label,
-                priceDelta: parseFloat(v.priceDelta || '0'),
-              })),
-            } : undefined,
+        entityType: 'MerchantItem',
+        entityId: id,
+        changeType: 'UPDATE',
+        payload: JSON.stringify({
+          original: existing,
+          updated: {
+            merchantId: merchantId || existing.merchantId,
+            categoryId: categoryId || existing.categoryId,
+            name: name || existing.name,
+            description: description ?? existing.description,
+            price: price != null ? parseFloat(price) : existing.price,
+            imageUrl: imageUrl ?? existing.imageUrl,
+            videoUrl: videoUrl ?? existing.videoUrl,
+            status: status || existing.status,
+            sellingOption: sellingOption || existing.sellingOption,
+            variants: variants || [],
+            optionGroups: optionGroups || [],
           },
-        });
-      }
-    }
-
-    const result = await prisma.item.findUnique({
-      where: { id },
-      include: { merchant: true, category: true, variants: true, optionGroups: { include: { values: true } } },
+        }),
+        createdById: user.id,
+      },
     });
 
-    await createAuditLog({ actorId: user.id, action: 'UPDATE_ITEM', entity: 'Item', entityId: id, details: JSON.stringify({ name }) });
-    return NextResponse.json(result);
+    await createAuditLog({ actorId: user.id, action: 'UPDATE_ITEM_REQUEST', entity: 'Item', entityId: id, details: JSON.stringify({ name }) });
+    return NextResponse.json(pending);
   } catch (error) {
-    console.error('Error updating item:', error);
+    console.error('Error updating item request:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
@@ -221,11 +157,28 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
 
-    await prisma.item.delete({ where: { id } });
-    await createAuditLog({ actorId: user.id, action: 'DELETE_ITEM', entity: 'Item', entityId: id });
-    return NextResponse.json({ success: true });
+    const existing = await prisma.item.findUnique({ where: { id } });
+    if (!existing) return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+
+    // Merchant users can only delete their own items
+    if (user.merchantId && existing.merchantId !== user.merchantId) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
+
+    const pending = await prisma.pendingChange.create({
+      data: {
+        entityType: 'MerchantItem',
+        entityId: id,
+        changeType: 'DELETE',
+        payload: JSON.stringify({ original: existing }),
+        createdById: user.id,
+      },
+    });
+
+    await createAuditLog({ actorId: user.id, action: 'DELETE_ITEM_REQUEST', entity: 'Item', entityId: id });
+    return NextResponse.json(pending);
   } catch (error) {
-    console.error('Error deleting item:', error);
+    console.error('Error deleting item request:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

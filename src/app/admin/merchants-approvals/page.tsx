@@ -12,7 +12,7 @@ export default async function MerchantApprovalsPage() {
   const changes = await prisma.pendingChange.findMany({
     where: {
       status: "PENDING",
-      entityType: "Merchant",
+      entityType: { in: ["Merchant", "MerchantItem", "MerchantDiscountRule", "MerchantLocation"] },
     },
     include: {
       createdBy: {

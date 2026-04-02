@@ -56,6 +56,11 @@ export async function PUT(req: NextRequest) {
     const order = await prisma.order.findUnique({ where: { id } });
     if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
 
+    // Merchant users can only update their own orders
+    if (user.merchantId && order.merchantId !== user.merchantId) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
+
     // Prevent cancelling delivered orders
     if (status === 'CANCELLED' && order.status === 'DELIVERED') {
       return NextResponse.json({ error: 'Cannot cancel a delivered order' }, { status: 400 });

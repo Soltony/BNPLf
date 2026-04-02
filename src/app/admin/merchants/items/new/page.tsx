@@ -33,9 +33,21 @@ export default function NewItemPage() {
   const [price, setPrice] = useState('');
   const [status, setStatus] = useState('ACTIVE');
   const [sellingOption, setSellingOption] = useState('BNPL_ONLY');
-  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [videoUrl, setVideoUrl] = useState('');
 
+  // Determine if the selected merchant has BNPL enabled
+  const selectedMerchant = merchants.find((m: any) => String(m.id) === String(merchantId));
+  const isBnplEnabled = selectedMerchant?.bnplEnabled === true;
+
+  // When merchant changes, reset selling option appropriately
+  useEffect(() => {
+    if (merchantId) {
+      const m = merchants.find((x: any) => String(x.id) === String(merchantId));
+      setSellingOption(m?.bnplEnabled ? 'BNPL_ONLY' : 'DIRECT_ONLY');
+    }
+  }, [merchantId, merchants]);
   // Attributes (option groups)
   const [attributes, setAttributes] = useState<{ name: string; values: { label: string; priceDelta: string }[] }[]>([]);
 
@@ -146,12 +158,15 @@ export default function NewItemPage() {
     setLoading(true);
     try {
       let imageUrl: string | null = null;
-      if (imageFile) {
-        const reader = new FileReader();
-        imageUrl = await new Promise<string>((resolve) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(imageFile);
-        });
+      if (imageFiles.length > 0) {
+        const readFileAsDataUrl = (file: File): Promise<string> =>
+          new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+        const urls = await Promise.all(imageFiles.map(readFileAsDataUrl));
+        imageUrl = JSON.stringify(urls);
       }
 
       // Build option groups from attributes
@@ -273,6 +288,7 @@ export default function NewItemPage() {
                 </SelectContent>
               </Select>
             </div>
+            {isBnplEnabled ? (
             <div>
               <Label>Selling Option</Label>
               <Select value={sellingOption} onValueChange={setSellingOption}>
@@ -284,9 +300,36 @@ export default function NewItemPage() {
                 </SelectContent>
               </Select>
             </div>
+            ) : (
             <div>
-              <Label>Image</Label>
-              <Input type="file" accept="image/*" onChange={e => setImageFile(e.target.files?.[0] || null)} />
+              <Label>Selling Option</Label>
+              <Input value="Direct Payment Only" disabled />
+            </div>
+            )}
+            <div>
+              <Label>Images (first image is the main display image)</Label>
+              <Input type="file" accept="image/*" multiple onChange={e => {
+                const files = Array.from(e.target.files || []);
+                setImageFiles(files);
+                // Generate previews
+                Promise.all(files.map(f => new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(reader.result as string);
+                  reader.readAsDataURL(f);
+                }))).then(setImagePreviews);
+              }} />
+              {imagePreviews.length > 0 && (
+                <div className="flex flex-wrap gap-3 mt-3">
+                  {imagePreviews.map((src, i) => (
+                    <div key={i} className="relative">
+                      <img src={src} alt={`Preview ${i + 1}`} className="h-20 w-20 rounded-lg border bg-white object-cover" />
+                      {i === 0 && imagePreviews.length > 1 && (
+                        <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-medium">Main</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <Label>Product video URL (YouTube, TikTok, etc.)</Label>

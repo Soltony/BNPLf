@@ -137,10 +137,10 @@ export function ProductCard({
                 });
                 
                 // Use accurate paid amounts from the detailed calculation
-                // Service fee is only charged with first installment
-                const serviceFeeDue = activeInst.installmentNumber === 1 
-                    ? Math.max(0, totals.serviceFee - totals.serviceFeePaid) 
-                    : 0;
+                // Service fee is equally split across all installments
+                const totalInstallments = installments.length || 1;
+                const serviceFeePerInstallment = totals.serviceFee / totalInstallments;
+                const serviceFeeDue = Math.max(0, serviceFeePerInstallment - (totals.serviceFeePaid / totalInstallments));
                 
                 // Interest remaining after what's been paid (accurate from simulation)
                 const interestDue = Math.max(0, totals.interest - totals.interestPaid);

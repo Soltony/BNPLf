@@ -127,7 +127,7 @@ export function ProtectedLayout({ children, providers }: ProtectedLayoutProps) {
     if (!currentUser || !currentUser.permissions) return [];
     
     return allMenuItems.filter((item) => {
-        const moduleName = item.label.toLowerCase().replace(/\s+/g, '-');
+        const moduleName = item.permissionKey || item.label.toLowerCase().replace(/\s+/g, '-');
         // Fallback for roles that might not have all permission keys yet
         return currentUser.permissions[moduleName]?.read;
     });

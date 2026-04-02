@@ -1456,6 +1456,162 @@ async function applyChange(
       }
       break;
 
+    case "MerchantItem":
+      if (changeType === "CREATE") {
+        const { variants, optionGroups, ...itemData } = data.created;
+        await prisma.item.create({
+          data: {
+            ...itemData,
+            variants: variants?.length ? {
+              create: variants.map((v: any) => ({
+                name: v.name,
+                size: v.size || null,
+                color: v.color || null,
+                material: v.material || null,
+                price: parseFloat(v.price),
+                status: v.status || 'ACTIVE',
+              })),
+            } : undefined,
+            optionGroups: optionGroups?.length ? {
+              create: optionGroups.map((g: any) => ({
+                name: g.name,
+                values: g.values?.length ? {
+                  create: g.values.map((v: any) => ({
+                    label: v.label,
+                    priceDelta: parseFloat(v.priceDelta || '0'),
+                  })),
+                } : undefined,
+              })),
+            } : undefined,
+          },
+        });
+      } else if (changeType === "UPDATE") {
+        const { variants, optionGroups, ...updateFields } = data.updated;
+        await prisma.item.update({
+          where: { id: entityId },
+          data: {
+            merchantId: updateFields.merchantId,
+            categoryId: updateFields.categoryId,
+            name: updateFields.name,
+            description: updateFields.description,
+            price: updateFields.price,
+            imageUrl: updateFields.imageUrl,
+            videoUrl: updateFields.videoUrl,
+            status: updateFields.status,
+            sellingOption: updateFields.sellingOption,
+          },
+        });
+        // Replace option groups if provided
+        if (optionGroups) {
+          await prisma.itemOptionGroup.deleteMany({ where: { itemId: entityId } });
+          for (const g of optionGroups) {
+            if (!g.name) continue;
+            await prisma.itemOptionGroup.create({
+              data: {
+                itemId: entityId as string,
+                name: g.name,
+                values: g.values?.length ? {
+                  create: g.values.map((v: any) => ({
+                    label: v.label,
+                    priceDelta: parseFloat(v.priceDelta || '0'),
+                  })),
+                } : undefined,
+              },
+            });
+          }
+        }
+        // Replace variants if provided
+        if (variants) {
+          await prisma.itemVariant.deleteMany({ where: { itemId: entityId } });
+          if (variants.length > 0) {
+            await prisma.itemVariant.createMany({
+              data: variants.map((v: any) => ({
+                itemId: entityId as string,
+                name: v.name,
+                size: v.size || null,
+                color: v.color || null,
+                material: v.material || null,
+                price: parseFloat(v.price),
+                status: v.status || 'ACTIVE',
+              })),
+            });
+          }
+        }
+      } else if (changeType === "DELETE") {
+        await prisma.item.delete({ where: { id: entityId } });
+      }
+      break;
+
+    case "MerchantDiscountRule":
+      if (changeType === "CREATE") {
+        const d = data.created;
+        await prisma.discountRule.create({
+          data: {
+            name: d.name,
+            type: d.type,
+            value: d.value,
+            buyX: d.buyX,
+            getY: d.getY,
+            itemId: d.itemId,
+            categoryId: d.categoryId,
+            minQuantity: d.minQuantity ?? 1,
+            startDate: d.startDate ? new Date(d.startDate) : null,
+            endDate: d.endDate ? new Date(d.endDate) : null,
+            status: d.status || 'ACTIVE',
+          },
+        });
+      } else if (changeType === "UPDATE") {
+        const u = data.updated;
+        await prisma.discountRule.update({
+          where: { id: entityId },
+          data: {
+            name: u.name,
+            type: u.type,
+            value: u.value,
+            buyX: u.buyX,
+            getY: u.getY,
+            itemId: u.itemId,
+            categoryId: u.categoryId,
+            minQuantity: u.minQuantity,
+            startDate: u.startDate ? new Date(u.startDate) : null,
+            endDate: u.endDate ? new Date(u.endDate) : null,
+            status: u.status,
+          },
+        });
+      } else if (changeType === "DELETE") {
+        await prisma.discountRule.delete({ where: { id: entityId } });
+      }
+      break;
+
+    case "MerchantLocation":
+      if (changeType === "CREATE") {
+        const loc = data.created;
+        await prisma.stockLocation.create({
+          data: {
+            name: loc.name,
+            address: loc.address,
+            contactInfo: loc.contactInfo,
+            branchId: loc.branchId,
+            status: loc.status || 'ACTIVE',
+          },
+        });
+      } else if (changeType === "UPDATE") {
+        const loc = data.updated;
+        await prisma.stockLocation.update({
+          where: { id: entityId },
+          data: {
+            name: loc.name,
+            address: loc.address,
+            contactInfo: loc.contactInfo,
+            branchId: loc.branchId,
+            status: loc.status,
+          },
+        });
+      } else if (changeType === "DELETE") {
+        await prisma.stockLocation.delete({ where: { id: entityId } });
+      }
+      break;
+
     default:
       throw new Error(`Unknown entity type for approval: ${entityType}`);
   }
@@ -1463,7 +1619,7 @@ async function applyChange(
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromSession();
-  if (!user || (!user.permissions?.["approvals"]?.update && !user.permissions?.["reversal-approval"]?.update)) {
+  if (!user || (!user.permissions?.["approvals"]?.update && !user.permissions?.["reversal-approval"]?.update && !user.permissions?.["merchants-approvals"]?.update)) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 

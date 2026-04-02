@@ -338,3 +338,55 @@ export async function PUT(req: NextRequest) {
     return handleApiError(error, { operation: 'PUT /api/users', info: { userId: body?.id } });
   }
 }
+
+export async function DELETE(req: NextRequest) {
+    const user = await getUserFromSession();
+    if (!user || !user.permissions?.['access-control']?.delete) {
+        return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
+
+    const ipAddress = req.ip || req.headers.get('x-forwarded-for') || 'N/A';
+    const userAgent = req.headers.get('user-agent') || 'N/A';
+    try {
+        const body = await req.json();
+        const { id } = body;
+        if (!id) return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
+
+        const existingUser = await prisma.user.findUnique({ where: { id }, include: { role: true } });
+        if (!existingUser) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+
+        // Prevent deleting Super Admin users by non-super-admins
+        if (existingUser.role.name === 'Super Admin' && user.role !== 'Super Admin') {
+            return NextResponse.json({ error: 'You cannot delete a Super Admin user.' }, { status: 403 });
+        }
+
+        // Horizontal access control
+        if (user.role !== 'Super Admin' && user.loanProviderId) {
+            if (existingUser.loanProviderId && existingUser.loanProviderId !== user.loanProviderId) {
+                return NextResponse.json({ error: 'You do not have permission to delete this user.' }, { status: 403 });
+            }
+        }
+
+        // Revoke sessions before deleting
+        try { await revokeAllUserSessions(id); } catch { /* ignore */ }
+
+        await prisma.user.delete({ where: { id } });
+
+        await createAuditLog({
+            actorId: user.id,
+            action: 'USER_DELETE_SUCCESS',
+            entity: 'USER',
+            entityId: id,
+            details: JSON.stringify({ deletedUserEmail: existingUser.email }),
+            ipAddress,
+            userAgent,
+        });
+
+        return NextResponse.json({ message: 'User deleted successfully' });
+    } catch (error) {
+        const errorMessage = (error as Error).message;
+        await createAuditLog({ actorId: user.id, action: 'USER_DELETE_FAILED', entity: 'USER', details: { error: errorMessage }, ipAddress, userAgent });
+        console.error('Error deleting user:', error);
+        return handleApiError(error, { operation: 'DELETE /api/users' });
+    }
+}

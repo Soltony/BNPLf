@@ -92,7 +92,14 @@ export function HistoryClient({ initialLoanHistory, providers, taxConfigs }: His
     // If the loan has an active installment, default to that installment amount (plus penalty)
     const activeInstallment = Array.isArray(loan.installments) ? loan.installments.find(i => i.isActive) : undefined;
     if (activeInstallment) {
-      const installBalance = Math.max(0, (activeInstallment.amount - (activeInstallment.paidAmount || 0)) + (activeInstallment.penaltyAmount || 0));
+      // Include proportional service fee in the installment balance
+      const totalInstallments = Array.isArray(loan.installments) ? loan.installments.length : 1;
+      const serviceFeePerInstallment = (loan.serviceFee || 0) / totalInstallments;
+      const installBalance = Math.max(0,
+        (activeInstallment.amount - (activeInstallment.paidAmount || 0))
+        + serviceFeePerInstallment
+        + (activeInstallment.penaltyAmount || 0)
+      );
       setRepayingLoanInfo({ loan, balanceDue: installBalance, installmentId: activeInstallment.id });
       setIsRepayDialogOpen(true);
       return;

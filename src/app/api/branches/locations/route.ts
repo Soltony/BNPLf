@@ -8,7 +8,12 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
 
   try {
+    const where: any = {};
+    // Merchant users only see their own locations
+    if (user.merchantId) where.merchantId = user.merchantId;
+
     const locations = await prisma.stockLocation.findMany({
+      where,
       include: { branch: true },
       orderBy: { createdAt: 'desc' },
     });
@@ -29,14 +34,31 @@ export async function POST(req: NextRequest) {
     const { name, address, contactInfo, branchId, status } = await req.json();
     if (!name?.trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
-    const location = await prisma.stockLocation.create({
-      data: { name: name.trim(), address: address || null, contactInfo: contactInfo || null, branchId: branchId || null, status: status || 'ACTIVE' },
+    // Auto-set merchantId for merchant users
+    const merchantId = user.merchantId || null;
+
+    const pending = await prisma.pendingChange.create({
+      data: {
+        entityType: 'MerchantLocation',
+        changeType: 'CREATE',
+        payload: JSON.stringify({
+          created: {
+            name: name.trim(),
+            address: address || null,
+            contactInfo: contactInfo || null,
+            branchId: branchId || null,
+            merchantId,
+            status: status || 'ACTIVE',
+          },
+        }),
+        createdById: user.id,
+      },
     });
 
-    await createAuditLog({ actorId: user.id, action: 'CREATE_STOCK_LOCATION', entity: 'StockLocation', entityId: location.id, details: JSON.stringify({ name }) });
-    return NextResponse.json(location, { status: 201 });
+    await createAuditLog({ actorId: user.id, action: 'CREATE_STOCK_LOCATION_REQUEST', entity: 'StockLocation', details: JSON.stringify({ name }) });
+    return NextResponse.json(pending, { status: 201 });
   } catch (error) {
-    console.error('Error creating location:', error);
+    console.error('Error creating location request:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
@@ -51,21 +73,37 @@ export async function PUT(req: NextRequest) {
     const { id, name, address, contactInfo, branchId, status } = await req.json();
     if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
 
-    const updated = await prisma.stockLocation.update({
-      where: { id },
+    const existing = await prisma.stockLocation.findUnique({ where: { id } });
+    if (!existing) return NextResponse.json({ error: 'Location not found' }, { status: 404 });
+
+    // Merchant users can only update their own locations
+    if (user.merchantId && existing.merchantId !== user.merchantId) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
+
+    const pending = await prisma.pendingChange.create({
       data: {
-        ...(name && { name }),
-        address: address ?? undefined,
-        contactInfo: contactInfo ?? undefined,
-        branchId: branchId !== undefined ? (branchId || null) : undefined,
-        ...(status && { status }),
+        entityType: 'MerchantLocation',
+        entityId: id,
+        changeType: 'UPDATE',
+        payload: JSON.stringify({
+          original: existing,
+          updated: {
+            name: name || existing.name,
+            address: address ?? existing.address,
+            contactInfo: contactInfo ?? existing.contactInfo,
+            branchId: branchId !== undefined ? (branchId || null) : existing.branchId,
+            status: status || existing.status,
+          },
+        }),
+        createdById: user.id,
       },
     });
 
-    await createAuditLog({ actorId: user.id, action: 'UPDATE_STOCK_LOCATION', entity: 'StockLocation', entityId: id });
-    return NextResponse.json(updated);
+    await createAuditLog({ actorId: user.id, action: 'UPDATE_STOCK_LOCATION_REQUEST', entity: 'StockLocation', entityId: id });
+    return NextResponse.json(pending);
   } catch (error) {
-    console.error('Error updating location:', error);
+    console.error('Error updating location request:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
@@ -81,11 +119,28 @@ export async function DELETE(req: NextRequest) {
     const id = searchParams.get('id');
     if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
 
-    await prisma.stockLocation.delete({ where: { id } });
-    await createAuditLog({ actorId: user.id, action: 'DELETE_STOCK_LOCATION', entity: 'StockLocation', entityId: id });
-    return NextResponse.json({ success: true });
+    const existing = await prisma.stockLocation.findUnique({ where: { id } });
+    if (!existing) return NextResponse.json({ error: 'Location not found' }, { status: 404 });
+
+    // Merchant users can only delete their own locations
+    if (user.merchantId && existing.merchantId !== user.merchantId) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
+
+    const pending = await prisma.pendingChange.create({
+      data: {
+        entityType: 'MerchantLocation',
+        entityId: id,
+        changeType: 'DELETE',
+        payload: JSON.stringify({ original: existing }),
+        createdById: user.id,
+      },
+    });
+
+    await createAuditLog({ actorId: user.id, action: 'DELETE_STOCK_LOCATION_REQUEST', entity: 'StockLocation', entityId: id });
+    return NextResponse.json(pending);
   } catch (error) {
-    console.error('Error deleting location:', error);
+    console.error('Error deleting location request:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

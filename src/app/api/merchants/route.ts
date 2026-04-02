@@ -26,6 +26,12 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { name, status, accountNumber, iconUrl, contactPersonName, contactPersonPhone, contactPersonEmail, additionalContactInfo, bnplEnabled } = body;
     if (!name?.trim()) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    if (!accountNumber?.trim()) return NextResponse.json({ error: 'Account number is required' }, { status: 400 });
+    if (!/^7\d{12}$/.test(accountNumber.trim())) return NextResponse.json({ error: 'Account number must start with 7 and be 13 characters long' }, { status: 400 });
+    if (!contactPersonName?.trim()) return NextResponse.json({ error: 'Contact person name is required' }, { status: 400 });
+    if (!contactPersonPhone?.trim()) return NextResponse.json({ error: 'Contact person phone is required' }, { status: 400 });
+    if (!/^(09\d{8}|9\d{8}|\+2519\d{8})$/.test(contactPersonPhone.trim())) return NextResponse.json({ error: 'Invalid Ethiopian phone format' }, { status: 400 });
+    if (contactPersonEmail?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactPersonEmail.trim())) return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
 
     // Create as PendingChange for maker-checker
     const pending = await prisma.pendingChange.create({
@@ -74,6 +80,14 @@ export async function PUT(req: NextRequest) {
 
     const existing = await prisma.merchant.findUnique({ where: { id } });
     if (!existing) return NextResponse.json({ error: 'Merchant not found' }, { status: 404 });
+
+    // Validate updated fields
+    const finalAccountNumber = accountNumber !== undefined ? accountNumber : existing.accountNumber;
+    if (finalAccountNumber?.trim() && !/^7\d{12}$/.test(finalAccountNumber.trim())) return NextResponse.json({ error: 'Account number must start with 7 and be 13 characters long' }, { status: 400 });
+    const finalContactPhone = contactPersonPhone !== undefined ? contactPersonPhone : existing.contactPersonPhone;
+    if (finalContactPhone?.trim() && !/^(09\d{8}|9\d{8}|\+2519\d{8})$/.test(finalContactPhone.trim())) return NextResponse.json({ error: 'Invalid Ethiopian phone format' }, { status: 400 });
+    const finalContactEmail = contactPersonEmail !== undefined ? contactPersonEmail : existing.contactPersonEmail;
+    if (finalContactEmail?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(finalContactEmail.trim())) return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
 
     const pending = await prisma.pendingChange.create({
       data: {

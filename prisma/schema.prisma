@@ -105,6 +105,7 @@ model LoanProvider {
   ledgerAccounts          LedgerAccount[]
   journalEntries          JournalEntry[]
   termsAndConditions      TermsAndConditions[]
+  deliveryAgreementTemplates DeliveryAgreementTemplate[]
   distributions           ProviderDistribution[]
 }
 
@@ -769,6 +770,8 @@ model Merchant {
   items                 Item[]
   orders                Order[]
   users                 User[]
+  discountRules         DiscountRule[]
+  stockLocations        StockLocation[]
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 }
@@ -857,6 +860,8 @@ model DiscountRule {
   value      Float            @default(0)
   buyX       Int?
   getY       Int?
+  merchantId String?
+  merchant   Merchant?        @relation(fields: [merchantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   itemId     String?
   item       Item?            @relation(fields: [itemId], references: [id], onDelete: Cascade)
   categoryId String?
@@ -868,6 +873,7 @@ model DiscountRule {
   createdAt  DateTime         @default(now())
   updatedAt  DateTime         @updatedAt
 
+  @@index([merchantId])
   @@index([itemId])
   @@index([categoryId])
   @@index([startDate, endDate])
@@ -889,6 +895,7 @@ model Order {
   totalAmount       Float            @default(0)
   currency          String           @default("ETB")
   orderItems        OrderItem[]
+  deliveryOtps      DeliveryOtp[]
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 
@@ -933,11 +940,15 @@ model StockLocation {
   contactInfo               String?
   branchId                  String?
   branch                    Branch?                    @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  merchantId                String?
+  merchant                  Merchant?                  @relation(fields: [merchantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   status                    String                     @default("ACTIVE")
   inventoryLevels           InventoryLevel[]
   combinationInventoryLevels CombinationInventoryLevel[]
   createdAt                 DateTime                   @default(now())
   updatedAt                 DateTime                   @updatedAt
+
+  @@index([merchantId])
 }
 
 model InventoryLevel {
@@ -969,4 +980,32 @@ model CombinationInventoryLevel {
   @@unique([itemId, locationId, combinationKey])
   @@index([itemId])
   @@index([locationId])
+}
+
+// --------------------------------------
+// DELIVERY AGREEMENT & OTP
+// --------------------------------------
+
+model DeliveryAgreementTemplate {
+  id         String   @id @default(cuid())
+  providerId String
+  provider   LoanProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  content    String   @db.Text
+  version    Int
+  isActive   Boolean  @default(false)
+  publishedAt DateTime
+
+  @@unique([providerId, version])
+}
+
+model DeliveryOtp {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  code       String
+  expiresAt  DateTime
+  verified   Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([orderId])
 }

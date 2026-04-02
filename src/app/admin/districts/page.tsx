@@ -90,11 +90,25 @@ export default function DistrictsPage() {
   const [buPassword, setBuPassword] = useState('');
   const [buRole, setBuRole] = useState('');
   const [buBranchId, setBuBranchId] = useState('');
+  const [buDistrictId, setBuDistrictId] = useState('');
   const [editingBranchUser, setEditingBranchUser] = useState<BranchUser | null>(null);
   const [branchUserDialogOpen, setBranchUserDialogOpen] = useState(false);
   const [buEditBranchId, setBuEditBranchId] = useState('');
+  const [buEditDistrictId, setBuEditDistrictId] = useState('');
 
   const [loading, setLoading] = useState(false);
+
+  // Pagination state
+  const DISTRICTS_PAGE_SIZE = 10;
+  const BRANCHES_PAGE_SIZE = 10;
+  const [districtsPage, setDistrictsPage] = useState(1);
+  const [branchesPage, setBranchesPage] = useState(1);
+
+  // Pagination helpers
+  const totalDistrictPages = Math.max(1, Math.ceil(districts.length / DISTRICTS_PAGE_SIZE));
+  const paginatedDistricts = districts.slice((districtsPage - 1) * DISTRICTS_PAGE_SIZE, districtsPage * DISTRICTS_PAGE_SIZE);
+  const totalBranchPages = Math.max(1, Math.ceil(branches.length / BRANCHES_PAGE_SIZE));
+  const paginatedBranches = branches.slice((branchesPage - 1) * BRANCHES_PAGE_SIZE, branchesPage * BRANCHES_PAGE_SIZE);
 
   // ── fetch helpers ────────────────────────────────────────────────────────────
 
@@ -132,7 +146,11 @@ export default function DistrictsPage() {
       const res = await fetch('/api/roles');
       if (res.ok) {
         const data = await res.json();
-        setRoles(data.map((r: any) => ({ id: r.id, name: r.name })));
+        setRoles(
+          data
+            .filter((r: any) => r.name === 'Branch')
+            .map((r: any) => ({ id: r.id, name: r.name }))
+        );
       }
     } catch { /* ignore */ }
   }, []);
@@ -152,6 +170,7 @@ export default function DistrictsPage() {
   useEffect(() => {
     if (selectedDistrict) {
       fetchBranches(selectedDistrict.id);
+      setBranchesPage(1);
     } else {
       setBranches([]);
     }
@@ -300,7 +319,18 @@ export default function DistrictsPage() {
     setBuPassword('');
     setBuRole('');
     setBuBranchId('');
+    setBuDistrictId('');
   };
+
+  // Filtered branches based on selected district (create form)
+  const filteredBranchesForCreate = buDistrictId
+    ? allBranches.filter((b) => b.districtId === buDistrictId)
+    : [];
+
+  // Filtered branches based on selected district (edit dialog)
+  const filteredBranchesForEdit = buEditDistrictId
+    ? allBranches.filter((b) => b.districtId === buEditDistrictId)
+    : [];
 
   const handleCreateBranchUser = async () => {
     setLoading(true);
@@ -477,7 +507,7 @@ export default function DistrictsPage() {
                   </p>
                 ) : (
                   <div className="divide-y">
-                    {districts.map((district) => (
+                    {paginatedDistricts.map((district) => (
                       <div
                         key={district.id}
                         onClick={() =>
@@ -548,6 +578,17 @@ export default function DistrictsPage() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+                {districts.length > DISTRICTS_PAGE_SIZE && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t">
+                    <span className="text-xs text-muted-foreground">
+                      Page {districtsPage} of {totalDistrictPages} ({districts.length} districts)
+                    </span>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={districtsPage <= 1} onClick={() => setDistrictsPage(p => p - 1)}>Prev</Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={districtsPage >= totalDistrictPages} onClick={() => setDistrictsPage(p => p + 1)}>Next</Button>
+                    </div>
                   </div>
                 )}
               </CardContent>
@@ -709,7 +750,7 @@ export default function DistrictsPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {branches.map((branch) => (
+                      {paginatedBranches.map((branch) => (
                         <TableRow key={branch.id}>
                           <TableCell className="font-medium">{branch.name}</TableCell>
                           <TableCell>
@@ -763,6 +804,17 @@ export default function DistrictsPage() {
                       ))}
                     </TableBody>
                   </Table>
+                )}
+                {branches.length > BRANCHES_PAGE_SIZE && (
+                  <div className="flex items-center justify-between px-4 py-3 border-t">
+                    <span className="text-xs text-muted-foreground">
+                      Page {branchesPage} of {totalBranchPages} ({branches.length} branches)
+                    </span>
+                    <div className="flex gap-1">
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={branchesPage <= 1} onClick={() => setBranchesPage(p => p - 1)}>Prev</Button>
+                      <Button size="sm" variant="outline" className="h-7 px-2 text-xs" disabled={branchesPage >= totalBranchPages} onClick={() => setBranchesPage(p => p + 1)}>Next</Button>
+                    </div>
+                  </div>
                 )}
               </CardContent>
             </Card>
@@ -831,16 +883,33 @@ export default function DistrictsPage() {
               </div>
               <div>
                 <Label>
-                  Assign to Branch <span className="text-red-500">*</span>
+                  District <span className="text-red-500">*</span>
                 </Label>
-                <Select value={buBranchId} onValueChange={setBuBranchId}>
+                <Select value={buDistrictId} onValueChange={(val) => { setBuDistrictId(val); setBuBranchId(''); }}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select branch" />
+                    <SelectValue placeholder="Select district" />
                   </SelectTrigger>
                   <SelectContent>
-                    {allBranches.map((b) => (
+                    {districts.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>
+                  Assign to Branch <span className="text-red-500">*</span>
+                </Label>
+                <Select value={buBranchId} onValueChange={setBuBranchId} disabled={!buDistrictId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={buDistrictId ? 'Select branch' : 'Select a district first'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredBranchesForCreate.map((b) => (
                       <SelectItem key={b.id} value={b.id}>
-                        {b.district?.name ? `${b.district.name} › ` : ''}{b.name}
+                        {b.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -911,6 +980,9 @@ export default function DistrictsPage() {
                           onClick={() => {
                             setEditingBranchUser(u);
                             setBuEditBranchId(u.branchId || '');
+                            // Find the district for the current branch
+                            const currentBranch = allBranches.find(b => b.id === u.branchId);
+                            setBuEditDistrictId(currentBranch?.districtId || '');
                             setBranchUserDialogOpen(true);
                           }}
                         >
@@ -968,15 +1040,30 @@ export default function DistrictsPage() {
           </DialogHeader>
           <div className="space-y-4">
             <div>
-              <Label>Assign to Branch</Label>
-              <Select value={buEditBranchId} onValueChange={setBuEditBranchId}>
+              <Label>District</Label>
+              <Select value={buEditDistrictId} onValueChange={(val) => { setBuEditDistrictId(val); setBuEditBranchId(''); }}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select branch" />
+                  <SelectValue placeholder="Select district" />
                 </SelectTrigger>
                 <SelectContent>
-                  {allBranches.map((b) => (
+                  {districts.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Assign to Branch</Label>
+              <Select value={buEditBranchId} onValueChange={setBuEditBranchId} disabled={!buEditDistrictId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={buEditDistrictId ? 'Select branch' : 'Select a district first'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {filteredBranchesForEdit.map((b) => (
                     <SelectItem key={b.id} value={b.id}>
-                      {b.district?.name ? `${b.district.name} › ` : ''}{b.name}
+                      {b.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

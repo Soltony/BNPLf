@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
-import { ChevronDown, ChevronUp, XCircle, AlertTriangle, ArrowLeft } from 'lucide-react';
+import { ChevronDown, ChevronUp, XCircle, AlertTriangle, ArrowLeft, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -17,6 +17,15 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+
+declare global {
+  interface Window {
+    myJsChannel?: { postMessage: (msg: string) => void };
+  }
+}
 
 const MERCHANT_RESPONDED_STATUSES = ['PENDING_DELIVERY', 'ON_DELIVERY', 'CANCELLED'];
 
@@ -69,6 +78,17 @@ function BnplOrdersPageInner() {
   const [cancelling, setCancelling] = useState(false);
   const [activeTab, setActiveTab] = useState<(typeof orderStatusTabs)[number]['value']>('active');
   const [seenOrderResponses, setSeenOrderResponses] = useState<Set<string>>(new Set());
+
+  // Delivery confirmation flow state
+  const [deliveryOrderId, setDeliveryOrderId] = useState<string | null>(null);
+  const [deliveryStep, setDeliveryStep] = useState<'agreement' | 'otp' | 'idle'>('idle');
+  const [agreementContent, setAgreementContent] = useState('');
+  const [agreementAccepted, setAgreementAccepted] = useState(false);
+  const [loadingAgreement, setLoadingAgreement] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [paymentProcessing, setPaymentProcessing] = useState(false);
 
   const load = () => {
     if (!borrowerId) return;
@@ -124,7 +144,6 @@ function BnplOrdersPageInner() {
   const confirmDelivered = async (orderId: string) => {
     setConfirming(orderId);
     try {
-      const order = orders.find(o => o.id === orderId);
       const res = await fetch('/api/bnpl/orders', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -134,11 +153,12 @@ function BnplOrdersPageInner() {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to confirm delivery');
       }
+      const order = orders.find(o => o.id === orderId);
       const isDirectPayment = order?.paymentType === 'DIRECT';
       toast({
         title: 'Delivery confirmed',
         description: isDirectPayment
-          ? 'Your order has been marked as delivered. You can now proceed with payment.'
+          ? 'Your order has been marked as delivered.'
           : 'Your order has been marked as delivered and the loan has been disbursed.',
       });
       load();
@@ -147,6 +167,132 @@ function BnplOrdersPageInner() {
     } finally {
       setConfirming(null);
     }
+  };
+
+  // Step 1: User clicks "Confirm delivered" → fetch agreement and show it
+  const startDeliveryConfirmation = async (orderId: string) => {
+    const order = orders.find(o => o.id === orderId);
+    if (!order) return;
+
+    setDeliveryOrderId(orderId);
+    setAgreementAccepted(false);
+    setOtpCode('');
+    setLoadingAgreement(true);
+    setDeliveryStep('agreement');
+
+    try {
+      // Get the provider ID from the order's loan application product
+      const providerId = order.loanApplication?.product?.providerId;
+      if (providerId) {
+        const res = await fetch(`/api/settings/delivery-agreement?providerId=${encodeURIComponent(providerId)}`);
+        const data = await res.json();
+        setAgreementContent(data?.content || '');
+      } else {
+        setAgreementContent('');
+      }
+    } catch {
+      setAgreementContent('');
+    } finally {
+      setLoadingAgreement(false);
+    }
+  };
+
+  // Step 2: Agreement accepted → handle based on payment type
+  const handleAgreementAccepted = async () => {
+    if (!deliveryOrderId) return;
+    const order = orders.find(o => o.id === deliveryOrderId);
+    if (!order) return;
+
+    if (order.paymentType === 'DIRECT') {
+      // Direct payment: initiate mini app payment, then confirm delivery
+      await handleDirectPayment(order);
+    } else {
+      // BNPL: send OTP, then verify, then confirm delivery
+      await sendDeliveryOtp(deliveryOrderId);
+    }
+  };
+
+  // BNPL flow: send OTP
+  const sendDeliveryOtp = async (orderId: string) => {
+    setOtpSending(true);
+    try {
+      const res = await fetch('/api/delivery-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to send OTP');
+      }
+      toast({ title: 'OTP Sent', description: 'A verification code has been sent to your phone.' });
+      setDeliveryStep('otp');
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setOtpSending(false);
+    }
+  };
+
+  // BNPL flow: verify OTP then confirm delivery
+  const verifyOtpAndConfirm = async () => {
+    if (!deliveryOrderId || !otpCode) return;
+    setOtpVerifying(true);
+    try {
+      const verifyRes = await fetch('/api/delivery-otp', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId: deliveryOrderId, code: otpCode }),
+      });
+      if (!verifyRes.ok) {
+        const err = await verifyRes.json().catch(() => ({}));
+        throw new Error(err.error || 'Invalid or expired OTP');
+      }
+      // OTP verified, confirm delivery
+      await confirmDelivered(deliveryOrderId);
+      closeDeliveryDialog();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setOtpVerifying(false);
+    }
+  };
+
+  // Direct payment flow: post order amount directly to the super app mini app payment
+  const handleDirectPayment = async (order: any) => {
+    setPaymentProcessing(true);
+    try {
+      if (typeof window !== 'undefined' && window.myJsChannel?.postMessage) {
+        window.myJsChannel.postMessage(JSON.stringify({
+          action: 'pay',
+          orderId: order.id,
+          amount: order.totalAmount,
+          currency: order.currency || 'ETB',
+          merchantName: order.merchant?.name || '',
+        }));
+        // Confirm delivery after payment is initiated
+        await confirmDelivered(order.id);
+        closeDeliveryDialog();
+        toast({
+          title: 'Processing Payment',
+          description: 'Your payment request has been sent to the Super App.',
+        });
+      } else {
+        throw new Error('Could not communicate with the payment app. Please open this page inside the Super App.');
+      }
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally {
+      setPaymentProcessing(false);
+    }
+  };
+
+  const closeDeliveryDialog = () => {
+    setDeliveryOrderId(null);
+    setDeliveryStep('idle');
+    setAgreementContent('');
+    setAgreementAccepted(false);
+    setOtpCode('');
   };
 
   const openCancelDialog = (orderId: string) => {
@@ -270,6 +416,22 @@ function BnplOrdersPageInner() {
                       <span className="text-muted-foreground">Merchant</span>
                       <span>{o.merchant?.name}</span>
                     </div>
+                    {o.merchant?.contactPersonPhone && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Contact</span>
+                        <span className="text-right text-xs">
+                          {o.merchant.contactPersonName && <span>{o.merchant.contactPersonName} &middot; </span>}
+                          {o.merchant.contactPersonPhone}
+                          {o.merchant.contactPersonEmail && <span> &middot; {o.merchant.contactPersonEmail}</span>}
+                        </span>
+                      </div>
+                    )}
+                    {o.merchant?.additionalContactInfo && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Location</span>
+                        <span className="text-right text-xs max-w-[60%]">{o.merchant.additionalContactInfo}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Items</span>
                       <span>
@@ -296,7 +458,7 @@ function BnplOrdersPageInner() {
                   {o.status === 'ON_DELIVERY' && (
                     <div className="mt-4 flex gap-2 justify-center">
                       <Button
-                        onClick={() => confirmDelivered(o.id)}
+                        onClick={() => startDeliveryConfirmation(o.id)}
                         disabled={confirming === o.id}
                         variant="outline"
                         className="px-6"
@@ -405,6 +567,99 @@ function BnplOrdersPageInner() {
               </Button>
               <Button variant="destructive" onClick={cancelOrder} disabled={cancelling}>
                 {cancelling ? 'Cancelling...' : 'Cancel Order'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Delivery Agreement Dialog */}
+        <Dialog open={deliveryStep === 'agreement'} onOpenChange={(open) => { if (!open) closeDeliveryDialog(); }}>
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Delivery Agreement</DialogTitle>
+              <DialogDescription>
+                Please read and accept the delivery agreement to proceed.
+              </DialogDescription>
+            </DialogHeader>
+            {loadingAgreement ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : agreementContent ? (
+              <ScrollArea className="max-h-[300px] rounded-md border p-4">
+                <div className="prose prose-sm max-w-none text-sm whitespace-pre-wrap">{agreementContent}</div>
+              </ScrollArea>
+            ) : (
+              <p className="text-sm text-muted-foreground py-4 text-center">No delivery agreement configured.</p>
+            )}
+            <div className="flex items-center gap-2 mt-2">
+              <Checkbox
+                id="accept-delivery-agreement"
+                checked={agreementAccepted}
+                onCheckedChange={(v) => setAgreementAccepted(v === true)}
+              />
+              <label htmlFor="accept-delivery-agreement" className="text-sm cursor-pointer">
+                I have read and accept the delivery agreement
+              </label>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={closeDeliveryDialog}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAgreementAccepted}
+                disabled={!agreementAccepted || otpSending || paymentProcessing}
+              >
+                {otpSending || paymentProcessing ? (
+                  <><Loader2 className="h-4 w-4 animate-spin mr-2" />Processing...</>
+                ) : (
+                  'Continue'
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* OTP Verification Dialog (BNPL only) */}
+        <Dialog open={deliveryStep === 'otp'} onOpenChange={(open) => { if (!open) closeDeliveryDialog(); }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Enter Verification Code</DialogTitle>
+              <DialogDescription>
+                A 6-digit code has been sent to your phone. Enter it below to confirm delivery.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <Input
+                placeholder="Enter 6-digit OTP"
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                maxLength={6}
+                className="text-center text-lg tracking-widest font-mono"
+                autoFocus
+              />
+              <Button
+                variant="link"
+                className="text-xs p-0 h-auto"
+                onClick={() => deliveryOrderId && sendDeliveryOtp(deliveryOrderId)}
+                disabled={otpSending}
+              >
+                {otpSending ? 'Sending...' : 'Resend OTP'}
+              </Button>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={closeDeliveryDialog}>
+                Cancel
+              </Button>
+              <Button
+                onClick={verifyOtpAndConfirm}
+                disabled={otpCode.length !== 6 || otpVerifying || confirming !== null}
+              >
+                {otpVerifying || confirming !== null ? (
+                  <><Loader2 className="h-4 w-4 animate-spin mr-2" />Verifying...</>
+                ) : (
+                  'Confirm Delivery'
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>

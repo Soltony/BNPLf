@@ -132,18 +132,7 @@ const ProductSettingsForm = ({ provider, product, providerColor, onSave, onDelet
     const snapshotProductIdRef = React.useRef<string | null>(null);
     const { toast } = useToast();
     
-    const fileInputRef = React.useRef<HTMLInputElement>(null);
     // Upload mode: 'replace' replaces all mappings, 'append' merges with existing
-    const [salaryUploadMode, setSalaryUploadMode] = useState<'replace' | 'append'>('append');
-    // Salary mappings management dialog state
-    const [isMappingsDialogOpen, setIsMappingsDialogOpen] = useState(false);
-    const [mappingsSearchQuery, setMappingsSearchQuery] = useState('');
-    const [editingMappingIndex, setEditingMappingIndex] = useState<number | null>(null);
-    const [editingAccountNumber, setEditingAccountNumber] = useState('');
-    const [editingSalary, setEditingSalary] = useState('');
-    const [mappingsPage, setMappingsPage] = useState(1);
-    const MAPPINGS_PAGE_SIZE = 10;
-
     const productActions = entityActions('LoanProduct');
     const eligibilityActions = entityActions('EligibilityList');
     const canEditProduct = !!(productActions.create || productActions.update);
@@ -194,296 +183,6 @@ const ProductSettingsForm = ({ provider, product, providerColor, onSave, onDelet
             onUpdate({ [name]: checked });
         }
     }
-
-    const handleFileSalaryUpload = async (file?: File | null) => {
-        if (!file) return;
-        
-        // Client-side validation: reject unsupported file types and oversized files early
-        const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-        const allowedTypes = [
-            'text/csv',
-            'application/vnd.ms-excel',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ];
-        const allowedExtensions = ['csv', 'xlsx', 'xls'];
-        
-        const name = file.name || '';
-        const ext = name.split('.').pop()?.toLowerCase();
-        
-        // Validate file extension
-        if (!ext || !allowedExtensions.includes(ext)) {
-            toast({ 
-                title: 'Invalid file type', 
-                description: 'Only .csv, .xlsx, and .xls files are allowed.', 
-                variant: 'destructive' 
-            });
-            return;
-        }
-        
-        // Validate file type (MIME type) - allow if either MIME type matches or extension is valid
-        // Some systems may not report correct MIME types for CSV files
-        if (file.type && !allowedTypes.includes(file.type) && !file.type.includes('sheet') && !file.type.includes('csv')) {
-            toast({ 
-                title: 'Invalid file type', 
-                description: 'Only .csv, .xlsx, and .xls files are allowed.', 
-                variant: 'destructive' 
-            });
-            return;
-        }
-        
-        // Validate file size
-        if (file.size > MAX_FILE_SIZE) {
-            toast({ 
-                title: 'File too large', 
-                description: 'Maximum file size is 10MB.', 
-                variant: 'destructive' 
-            });
-            return;
-        }
-        
-        try {
-            let mappings: Array<any> = [];
-            if (ext === 'xlsx' || ext === 'xls' || (file.type && file.type.includes('sheet'))) {
-                // parse with ExcelJS
-                const buffer = await file.arrayBuffer();
-                const workbook = new ExcelJS.Workbook();
-                await workbook.xlsx.load(buffer);
-                const sheet = workbook.worksheets[0];
-                if (sheet) {
-                    const headerRow = sheet.getRow(1).values as any[];
-                    const rawHeaders = (headerRow || []).slice(1).map((h: any) => String(h || '').trim());
-                    const canonicalHeaders = rawHeaders.map(h => {
-                        const norm = String(h || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-                        if (norm.includes('account') || norm.includes('acct')) return 'accountNumber';
-                        if (norm.includes('salary') || norm.includes('amount') || norm.includes('pay')) return 'salary';
-                        return norm || h;
-                    });
-                    for (let i = 2; i <= sheet.rowCount; i++) {
-                        const row = sheet.getRow(i).values as any[];
-                        if (!row || row.length <= 1) continue;
-                        const data: any = {};
-                        canonicalHeaders.forEach((h: string, idx: number) => {
-                          data[h] = row[idx + 1] ?? '';
-                        });
-                        mappings.push({
-                            accountNumber: String(data.accountNumber || '').trim(),
-                            salary: Number(data.salary || 0)
-                        });
-                    }
-                }
-            } else {
-                const text = await file.text();
-                const lines = text.split(/\r?\n/).filter(l => l.trim() !== '');
-                if (lines.length) {
-                    const raw = lines[0].split(',').map(h => h.trim());
-                    const headers = raw.map(h => {
-                        const norm = h.toLowerCase().replace(/[^a-z0-9]/g, '');
-                        if (norm.includes('account') || norm.includes('acct')) return 'accountNumber';
-                        if (norm.includes('salary') || norm.includes('amount') || norm.includes('pay')) return 'salary';
-                        return h;
-                    });
-                    const rows = lines.slice(1).map(line => {
-                        const cols = line.split(',');
-                        const obj: any = {};
-                        headers.forEach((h, i) => obj[h] = cols[i] ? cols[i].trim() : '');
-                        return obj;
-                    });
-                    mappings = rows.map((r: any) => ({
-                        accountNumber: String(r.accountNumber || '').trim(),
-                        salary: Number(r.salary || 0)
-                    })).filter((r: any) => r.accountNumber);
-                }
-            }
-
-            mappings = mappings.filter((m: any) => m.accountNumber);
-            
-            if (mappings.length === 0) {
-                toast({ 
-                    title: 'No valid data found', 
-                    description: 'The file must contain at least one row with an account number.', 
-                    variant: 'destructive' 
-                });
-                return;
-            }
-
-            // Handle append mode - merge with existing mappings
-            let finalMappings = mappings;
-            if (salaryUploadMode === 'append' && formData.salaryAdvanceMappings) {
-                try {
-                    const existingMappings = JSON.parse(formData.salaryAdvanceMappings as string) as Array<{ accountNumber: string; salary: number }>;
-                    // Create a map of existing entries for efficient lookup
-                    const existingMap = new Map(existingMappings.map(m => [String(m.accountNumber), m]));
-                    
-                    // Add or update with new mappings
-                    let addedCount = 0;
-                    let updatedCount = 0;
-                    for (const newMapping of mappings) {
-                        const accountKey = String(newMapping.accountNumber);
-                        if (existingMap.has(accountKey)) {
-                            // Update existing entry
-                            existingMap.set(accountKey, newMapping);
-                            updatedCount++;
-                        } else {
-                            // Add new entry
-                            existingMap.set(accountKey, newMapping);
-                            addedCount++;
-                        }
-                    }
-                    
-                    finalMappings = Array.from(existingMap.values());
-                    
-                    onUpdate({ salaryAdvanceMappings: JSON.stringify(finalMappings) });
-                    toast({ 
-                        title: 'Mappings updated', 
-                        description: `Added ${addedCount} new mapping${addedCount !== 1 ? 's' : ''}, updated ${updatedCount} existing mapping${updatedCount !== 1 ? 's' : ''}. Total: ${finalMappings.length} mappings.` 
-                    });
-                    return;
-                } catch (e) {
-                    console.error('Failed to parse existing mappings for append', e);
-                    // Fall back to replace mode if parsing fails
-                }
-            }
-            
-            onUpdate({ salaryAdvanceMappings: JSON.stringify(finalMappings) });
-            toast({ 
-                title: 'File uploaded', 
-                description: `Successfully ${salaryUploadMode === 'replace' ? 'replaced with' : 'loaded'} ${finalMappings.length} salary mapping${finalMappings.length !== 1 ? 's' : ''}.` 
-            });
-        } catch (err: any) {
-            console.error('Failed to parse salary mapping file', err);
-            toast({ 
-                title: 'Failed to parse file', 
-                description: err?.message || 'Could not read the salary mapping file. Please check the file format.', 
-                variant: 'destructive' 
-            });
-        }
-    }
-
-    // Parse salary mappings for display and management
-    const parsedMappings = useMemo(() => {
-        if (!formData.salaryAdvanceMappings) return [];
-        try {
-            return JSON.parse(formData.salaryAdvanceMappings as string) as Array<{ accountNumber: string; salary: number }>;
-        } catch {
-            return [];
-        }
-    }, [formData.salaryAdvanceMappings]);
-
-    // Filter and paginate mappings (preserve original indices so edit/delete work after searching)
-    const filteredMappingEntries = useMemo(() => {
-        const query = mappingsSearchQuery.trim().toLowerCase();
-        return parsedMappings
-            .map((m, originalIndex) => ({ mapping: m, originalIndex }))
-            .filter(({ mapping }) => {
-                if (!query) return true;
-                return (
-                    String(mapping.accountNumber).toLowerCase().includes(query) ||
-                    String(mapping.salary).includes(query)
-                );
-            });
-    }, [parsedMappings, mappingsSearchQuery]);
-
-    const paginatedMappingEntries = useMemo(() => {
-        const start = (mappingsPage - 1) * MAPPINGS_PAGE_SIZE;
-        return filteredMappingEntries.slice(start, start + MAPPINGS_PAGE_SIZE);
-    }, [filteredMappingEntries, mappingsPage]);
-
-    const totalMappingsPages = Math.ceil(filteredMappingEntries.length / MAPPINGS_PAGE_SIZE);
-
-    // Handle editing a mapping
-    const handleStartEditMapping = (originalIndex: number) => {
-        const mapping = parsedMappings[originalIndex];
-        if (mapping) {
-            setEditingMappingIndex(originalIndex);
-            setEditingAccountNumber(String(mapping.accountNumber));
-            setEditingSalary(String(mapping.salary));
-        }
-    };
-
-    const handleCancelEditMapping = () => {
-        setEditingMappingIndex(null);
-        setEditingAccountNumber('');
-        setEditingSalary('');
-    };
-
-    const handleSaveEditMapping = () => {
-        if (editingMappingIndex === null) return;
-        if (!editingAccountNumber.trim()) {
-            toast({ title: 'Invalid account number', description: 'Account number cannot be empty.', variant: 'destructive' });
-            return;
-        }
-        
-        const newMappings = [...parsedMappings];
-        const oldAccountNumber = newMappings[editingMappingIndex].accountNumber;
-        
-        // Check if new account number already exists (if changed)
-        if (editingAccountNumber !== oldAccountNumber) {
-            const exists = newMappings.some((m, i) => i !== editingMappingIndex && String(m.accountNumber) === editingAccountNumber);
-            if (exists) {
-                toast({ title: 'Duplicate account', description: 'This account number already exists in the list.', variant: 'destructive' });
-                return;
-            }
-        }
-        
-        newMappings[editingMappingIndex] = {
-            accountNumber: editingAccountNumber.trim(),
-            salary: Number(editingSalary) || 0
-        };
-        
-        onUpdate({ salaryAdvanceMappings: JSON.stringify(newMappings) });
-        toast({ title: 'Mapping updated', description: `Account ${editingAccountNumber} has been updated.` });
-        handleCancelEditMapping();
-    };
-
-    // Handle deleting a mapping
-    const handleDeleteMapping = (originalIndex: number) => {
-        const mapping = parsedMappings[originalIndex];
-        if (!mapping) return;
-        
-        const newMappings = parsedMappings.filter((_, i) => i !== originalIndex);
-        onUpdate({ salaryAdvanceMappings: JSON.stringify(newMappings) });
-        toast({ title: 'Mapping removed', description: `Account ${mapping.accountNumber} has been removed from the list.` });
-
-        if (editingMappingIndex === originalIndex) {
-            handleCancelEditMapping();
-        }
-        
-        // Adjust page if needed
-        if (paginatedMappingEntries.length === 1 && mappingsPage > 1) {
-            setMappingsPage(mappingsPage - 1);
-        }
-    };
-
-    // Handle adding a new mapping manually
-    const [isAddingMapping, setIsAddingMapping] = useState(false);
-    const [newMappingAccount, setNewMappingAccount] = useState('');
-    const [newMappingSalary, setNewMappingSalary] = useState('');
-
-    const handleAddMapping = () => {
-        if (!newMappingAccount.trim()) {
-            toast({ title: 'Invalid account number', description: 'Account number cannot be empty.', variant: 'destructive' });
-            return;
-        }
-        
-        const exists = parsedMappings.some(m => String(m.accountNumber) === newMappingAccount.trim());
-        if (exists) {
-            toast({ title: 'Duplicate account', description: 'This account number already exists in the list.', variant: 'destructive' });
-            return;
-        }
-        
-        const newMappings = [...parsedMappings, {
-            accountNumber: newMappingAccount.trim(),
-            salary: Number(newMappingSalary) || 0
-        }];
-        
-        onUpdate({ salaryAdvanceMappings: JSON.stringify(newMappings) });
-        toast({ title: 'Mapping added', description: `Account ${newMappingAccount} has been added.` });
-        setNewMappingAccount('');
-        setNewMappingSalary('');
-        setIsAddingMapping(false);
-        // Go to last page to show new entry
-        setMappingsPage(Math.ceil(newMappings.length / MAPPINGS_PAGE_SIZE));
-    };
 
     const handleStatusChange = async (checked: boolean) => {
         if (!canEditProduct) {
@@ -653,39 +352,34 @@ const ProductSettingsForm = ({ provider, product, providerColor, onSave, onDelet
         setIsSaving(true);
         try {
             const parsedDuration = parseInt(String(formData.duration)) || 30;
-            const parsedInstallments = formData.isSalaryAdvance
-                ? (formData.installments === '' || formData.installments === null || formData.installments === undefined
+            const parsedInstallments = (formData.installments === '' || formData.installments === null || formData.installments === undefined)
                     ? null
-                    : Number(formData.installments))
-                : null;
+                    : Number(formData.installments);
 
-            if (formData.isSalaryAdvance) {
-                if (!parsedInstallments || !Number.isFinite(parsedInstallments) || parsedInstallments <= 0) {
-                    throw new Error('For salary-advance products, Installments is required and must be greater than 0.');
+            if (parsedInstallments !== null) {
+                if (!Number.isFinite(parsedInstallments) || parsedInstallments <= 0) {
+                    throw new Error('Installments must be greater than 0.');
                 }
                 if (parsedDuration <= 0) {
-                    throw new Error('For salary-advance products, Loan Duration (days) must be greater than 0.');
+                    throw new Error('Loan Duration (days) must be greater than 0.');
                 }
                 if (parsedInstallments > parsedDuration) {
                     throw new Error('Installments cannot be greater than duration (days).');
                 }
             }
 
-            const computedIntervalDays = (formData.isSalaryAdvance && parsedInstallments)
+            const computedIntervalDays = (parsedInstallments && parsedInstallments > 0)
                 ? Math.floor(parsedDuration / parsedInstallments)
                 : null;
 
              const productToSave = {
                 ...formData,
-                minLoan: formData.isSalaryAdvance ? undefined : (parseFloat(String(formData.minLoan)) || 0),
-                maxLoan: formData.isSalaryAdvance ? undefined : (parseFloat(String(formData.maxLoan)) || 0),
+                minLoan: parseFloat(String(formData.minLoan)) || 0,
+                maxLoan: parseFloat(String(formData.maxLoan)) || 0,
                 duration: parsedDuration,
-                advancePercent: formData.isSalaryAdvance ? (formData.advancePercent ? Number(formData.advancePercent) : null) : undefined,
-                salaryAdvanceMappings: formData.isSalaryAdvance ? formData.salaryAdvanceMappings : undefined,
-                installments: formData.isSalaryAdvance ? parsedInstallments : undefined,
-                repaymentIntervalDays: formData.isSalaryAdvance ? (computedIntervalDays || undefined) : undefined,
-                // For installment-based products, apply penalties per installment.
-                penaltyPerInstallment: formData.isSalaryAdvance ? true : undefined,
+                installments: parsedInstallments,
+                repaymentIntervalDays: computedIntervalDays,
+                penaltyPerInstallment: parsedInstallments ? true : undefined,
                 // Exclude status and eligibility from the main product approval payload
                 status: undefined, 
                 dataProvisioningEnabled: undefined,
@@ -775,7 +469,7 @@ const ProductSettingsForm = ({ provider, product, providerColor, onSave, onDelet
                                 value={formData.minLoan ?? ''}
                                 onChange={handleChange}
                                 placeholder="e.g., 500"
-                                disabled={!canEditProduct || !!formData.isSalaryAdvance}
+                                disabled={!canEditProduct}
                             />
                         </div>
                         <div className="space-y-2">
@@ -787,7 +481,7 @@ const ProductSettingsForm = ({ provider, product, providerColor, onSave, onDelet
                                 value={formData.maxLoan ?? ''}
                                 onChange={handleChange}
                                 placeholder="e.g., 2500"
-                                disabled={!canEditProduct || !!formData.isSalaryAdvance}
+                                disabled={!canEditProduct}
                             />
                         </div>
                         <div className="space-y-2">
@@ -803,304 +497,22 @@ const ProductSettingsForm = ({ provider, product, providerColor, onSave, onDelet
                             />
                         </div>
                         <div className="space-y-2">
-                            <Label className="">Salary Advance</Label>
-                            <div className="flex items-center gap-2">
-                                <Switch
-                                    id={`isSalaryAdvance-${product.id}`}
-                                    checked={!!formData.isSalaryAdvance}
-                                    onCheckedChange={(checked) => handleSwitchChange('isSalaryAdvance', Boolean(checked))}
-                                    disabled={!canEditProduct}
-                                    className="data-[state=checked]:bg-[--provider-color]"
-                                    style={{'--provider-color': providerColor} as React.CSSProperties}
-                                />
-                                <span className="text-sm">Enable salary advance for this product</span>
-                            </div>
+                            <Label htmlFor={`installments-${product.id}`}>Installments</Label>
+                            <Input
+                                id={`installments-${product.id}`}
+                                name="installments"
+                                type="number"
+                                value={formData.installments ?? ''}
+                                onChange={handleChange}
+                                placeholder="e.g., 4 (leave empty for single repayment)"
+                                disabled={!canEditProduct}
+                            />
                         </div>
-                        {formData.isSalaryAdvance && (
-                          <>
-                            <div className="space-y-2">
-                                <Label htmlFor={`advancePercent-${product.id}`}>Advance Percent</Label>
-                                <Input
-                                    id={`advancePercent-${product.id}`}
-                                    name="advancePercent"
-                                    type="number"
-                                    value={formData.advancePercent ?? ''}
-                                    onChange={handleChange}
-                                    placeholder="e.g., 50"
-                                    disabled={!canEditProduct}
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor={`installments-${product.id}`}>Installments</Label>
-                                <Input
-                                    id={`installments-${product.id}`}
-                                    name="installments"
-                                    type="number"
-                                    value={formData.installments ?? ''}
-                                    onChange={handleChange}
-                                    placeholder="e.g., 12"
-                                    disabled={!canEditProduct}
-                                />
-                            </div>
-                            {formData.installments && Number(formData.installments) > 0 && (
-                              <div className="space-y-2">
-                                <Label>Repayment Interval</Label>
-                                <div className="text-sm text-muted-foreground">Every {Math.floor((Number(formData.duration) || 0) / Number(formData.installments)) || 0} days</div>
-                              </div>
-                            )}
-                            <div className="space-y-4">
-                                <Label>Salary Mapping Upload</Label>
-                                <div className="space-y-3">
-                                    {/* Upload Mode Selector */}
-                                    <div className="flex items-center gap-4 p-3 bg-muted/50 rounded-md">
-                                        <span className="text-sm font-medium">Upload Mode:</span>
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input 
-                                                type="radio" 
-                                                name={`uploadMode-${product.id}`}
-                                                checked={salaryUploadMode === 'append'} 
-                                                onChange={() => setSalaryUploadMode('append')}
-                                                disabled={!canEditProduct}
-                                                className="h-4 w-4"
-                                            />
-                                            <span className="text-sm">Add to existing list</span>
-                                        </label>
-                                        <label className="flex items-center gap-2 cursor-pointer">
-                                            <input 
-                                                type="radio" 
-                                                name={`uploadMode-${product.id}`}
-                                                checked={salaryUploadMode === 'replace'} 
-                                                onChange={() => setSalaryUploadMode('replace')}
-                                                disabled={!canEditProduct}
-                                                className="h-4 w-4"
-                                            />
-                                            <span className="text-sm">Replace entire list</span>
-                                        </label>
-                                    </div>
-                                    <div className="text-xs text-muted-foreground">
-                                        {salaryUploadMode === 'append' 
-                                            ? '• New entries will be added, existing account numbers will be updated with new salary values'
-                                            : '• Warning: This will remove all existing mappings and replace with the new file'}
-                                    </div>
-                                    <div>
-                                        <input type="file" accept=".csv,.xlsx,.xls" onChange={(e) => handleFileSalaryUpload(e.target.files ? e.target.files[0] : undefined)} disabled={!canEditProduct} />
-                                        <div className="text-sm text-muted-foreground mt-1">CSV columns: accountNumber,salary</div>
-                                    </div>
-                                </div>
-                                {formData.salaryAdvanceMappings && (
-                                    <div className="flex items-center justify-between">
-                                        <div className="text-sm text-muted-foreground">Current mappings: {parsedMappings.length} rows</div>
-                                        <Button 
-                                            type="button" 
-                                            variant="outline" 
-                                            size="sm"
-                                            onClick={() => {
-                                                setMappingsPage(1);
-                                                setMappingsSearchQuery('');
-                                                setIsMappingsDialogOpen(true);
-                                            }}
-                                        >
-                                            <Settings2 className="h-4 w-4 mr-2" />
-                                            Manage Mappings
-                                        </Button>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Salary Mappings Management Dialog */}
-                            <UIDialog open={isMappingsDialogOpen} onOpenChange={(open) => {
-                                setIsMappingsDialogOpen(open);
-                                if (!open) {
-                                    handleCancelEditMapping();
-                                    setIsAddingMapping(false);
-                                }
-                            }}>
-                                <UIDialogContent className="max-w-3xl max-h-[80vh] flex flex-col">
-                                    <UIDialogHeader>
-                                        <UIDialogTitle>Manage Salary Mappings</UIDialogTitle>
-                                        <UIDialogDescription>
-                                            View, edit, or remove salary mappings. Total: {parsedMappings.length} entries.
-                                        </UIDialogDescription>
-                                    </UIDialogHeader>
-                                    
-                                    {/* Search and Add */}
-                                    <div className="flex items-center gap-2 py-2">
-                                        <div className="relative flex-1">
-                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                            <Input 
-                                                placeholder="Search by account number or salary..." 
-                                                value={mappingsSearchQuery}
-                                                onChange={(e) => {
-                                                    setMappingsSearchQuery(e.target.value);
-                                                    setMappingsPage(1);
-                                                }}
-                                                className="pl-9"
-                                            />
-                                            {mappingsSearchQuery && (
-                                                <Button 
-                                                    variant="ghost" 
-                                                    size="icon" 
-                                                    className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6"
-                                                    onClick={() => setMappingsSearchQuery('')}
-                                                >
-                                                    <X className="h-3 w-3" />
-                                                </Button>
-                                            )}
-                                        </div>
-                                        {canEditProduct && !isAddingMapping && (
-                                            <Button variant="outline" size="sm" onClick={() => setIsAddingMapping(true)}>
-                                                <PlusCircle className="h-4 w-4 mr-2" />
-                                                Add Entry
-                                            </Button>
-                                        )}
-                                    </div>
-
-                                    {/* Add New Entry Form */}
-                                    {isAddingMapping && (
-                                        <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-md">
-                                            <Input 
-                                                placeholder="Account Number" 
-                                                value={newMappingAccount}
-                                                onChange={(e) => setNewMappingAccount(e.target.value)}
-                                                className="flex-1"
-                                            />
-                                            <Input 
-                                                type="number"
-                                                placeholder="Salary" 
-                                                value={newMappingSalary}
-                                                onChange={(e) => setNewMappingSalary(e.target.value)}
-                                                className="w-32"
-                                            />
-                                            <Button size="sm" onClick={handleAddMapping}>
-                                                <Save className="h-4 w-4 mr-1" />
-                                                Add
-                                            </Button>
-                                            <Button variant="ghost" size="sm" onClick={() => {
-                                                setIsAddingMapping(false);
-                                                setNewMappingAccount('');
-                                                setNewMappingSalary('');
-                                            }}>
-                                                Cancel
-                                            </Button>
-                                        </div>
-                                    )}
-
-                                    {/* Mappings Table */}
-                                    <div className="flex-1 overflow-auto border rounded-md">
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow>
-                                                    <TableHead className="w-16">#</TableHead>
-                                                    <TableHead>Account Number</TableHead>
-                                                    <TableHead className="w-32">Salary</TableHead>
-                                                    {canEditProduct && <TableHead className="w-24 text-right">Actions</TableHead>}
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {paginatedMappingEntries.length === 0 ? (
-                                                    <TableRow>
-                                                        <TableCell colSpan={canEditProduct ? 4 : 3} className="text-center text-muted-foreground py-8">
-                                                            {mappingsSearchQuery ? 'No matching entries found.' : 'No salary mappings yet.'}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ) : (
-                                                    paginatedMappingEntries.map(({ mapping, originalIndex }, index) => {
-                                                        const rowNumber = (mappingsPage - 1) * MAPPINGS_PAGE_SIZE + index + 1;
-                                                        const isEditing = editingMappingIndex === originalIndex;
-                                                        
-                                                        return (
-                                                            <TableRow key={originalIndex}>
-                                                                <TableCell className="text-muted-foreground">{rowNumber}</TableCell>
-                                                                <TableCell>
-                                                                    {isEditing ? (
-                                                                        <Input 
-                                                                            value={editingAccountNumber}
-                                                                            onChange={(e) => setEditingAccountNumber(e.target.value)}
-                                                                            className="h-8"
-                                                                        />
-                                                                    ) : (
-                                                                        <span className="font-mono">{mapping.accountNumber}</span>
-                                                                    )}
-                                                                </TableCell>
-                                                                <TableCell>
-                                                                    {isEditing ? (
-                                                                        <Input 
-                                                                            type="number"
-                                                                            value={editingSalary}
-                                                                            onChange={(e) => setEditingSalary(e.target.value)}
-                                                                            className="h-8 w-28"
-                                                                        />
-                                                                    ) : (
-                                                                        <span>{mapping.salary.toLocaleString()}</span>
-                                                                    )}
-                                                                </TableCell>
-                                                                {canEditProduct && (
-                                                                    <TableCell className="text-right">
-                                                                        {isEditing ? (
-                                                                            <div className="flex items-center justify-end gap-1">
-                                                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleSaveEditMapping}>
-                                                                                    <Save className="h-3.5 w-3.5 text-green-600" />
-                                                                                </Button>
-                                                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCancelEditMapping}>
-                                                                                    <X className="h-3.5 w-3.5" />
-                                                                                </Button>
-                                                                            </div>
-                                                                        ) : (
-                                                                            <div className="flex items-center justify-end gap-1">
-                                                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleStartEditMapping(originalIndex)}>
-                                                                                    <Pencil className="h-3.5 w-3.5" />
-                                                                                </Button>
-                                                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => handleDeleteMapping(originalIndex)}>
-                                                                                    <Trash2 className="h-3.5 w-3.5" />
-                                                                                </Button>
-                                                                            </div>
-                                                                        )}
-                                                                    </TableCell>
-                                                                )}
-                                                            </TableRow>
-                                                        );
-                                                    })
-                                                )}
-                                            </TableBody>
-                                        </Table>
-                                    </div>
-
-                                    {/* Pagination */}
-                                    {totalMappingsPages > 1 && (
-                                        <div className="flex items-center justify-between pt-2">
-                                            <div className="text-sm text-muted-foreground">
-                                                Showing {((mappingsPage - 1) * MAPPINGS_PAGE_SIZE) + 1} - {Math.min(mappingsPage * MAPPINGS_PAGE_SIZE, filteredMappingEntries.length)} of {filteredMappingEntries.length}
-                                            </div>
-                                            <div className="flex items-center gap-2">
-                                                <Button 
-                                                    variant="outline" 
-                                                    size="sm" 
-                                                    disabled={mappingsPage === 1}
-                                                    onClick={() => setMappingsPage(p => Math.max(1, p - 1))}
-                                                >
-                                                    <ChevronLeft className="h-4 w-4" />
-                                                </Button>
-                                                <span className="text-sm">Page {mappingsPage} of {totalMappingsPages}</span>
-                                                <Button 
-                                                    variant="outline" 
-                                                    size="sm" 
-                                                    disabled={mappingsPage >= totalMappingsPages}
-                                                    onClick={() => setMappingsPage(p => Math.min(totalMappingsPages, p + 1))}
-                                                >
-                                                    <ChevronRight className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <UIDialogFooter>
-                                        <UIDialogClose asChild>
-                                            <Button variant="outline">Close</Button>
-                                        </UIDialogClose>
-                                    </UIDialogFooter>
-                                </UIDialogContent>
-                            </UIDialog>
-                          </>
+                        {formData.installments && Number(formData.installments) > 0 && (
+                          <div className="space-y-2">
+                            <Label>Repayment Interval</Label>
+                            <div className="text-sm text-muted-foreground">Every {Math.floor((Number(formData.duration) || 0) / Number(formData.installments)) || 0} days</div>
+                          </div>
                         )}
                     </div>
 
@@ -1977,7 +1389,7 @@ function ProductConfiguration({ product, providerColor, onProductUpdate, taxConf
                                 style={{'--provider-color': providerColor} as React.CSSProperties}
                             />
                         </div>
-                            {config.isSalaryAdvance && (
+                            {config.installments && Number(config.installments) > 0 && (
                                 <div className="flex items-center justify-between mt-3">
                                     <div className="flex items-center gap-2">
                                         <Label htmlFor={`penaltyPerInstallment-${config.id}`} className="font-medium">Apply Penalty Per Installment</Label>
@@ -2804,7 +2216,7 @@ export function SettingsClient({ initialProviders, initialTaxConfig }: { initial
                                     <TabsTrigger value="configuration">Fee & Tier Configuration</TabsTrigger>
                                     <TabsTrigger value="loanCycles">Loan Cycle</TabsTrigger>
                                     <TabsTrigger value="eligibility">Eligibility</TabsTrigger>
-                                    <TabsTrigger value="agreement">Borrower Agreement</TabsTrigger>
+                                    <TabsTrigger value="agreement">Agreement</TabsTrigger>
                                     <TabsTrigger value="tax">Tax</TabsTrigger>
                                 </TabsList>
                                 <TabsContent value="providers">
@@ -2820,21 +2232,46 @@ export function SettingsClient({ initialProviders, initialTaxConfig }: { initial
                                     <EligibilityTab providers={providers} onProvidersChange={handleProvidersChange} />
                                 </TabsContent>
                                 <TabsContent value="agreement">
-                                    <Accordion type="multiple" className="w-full space-y-4">
-                                        {providers.map((provider) => (
-                                            <AccordionItem value={provider.id} key={provider.id} className="border rounded-lg bg-card">
-                                                <AccordionTrigger className="flex w-full items-center justify-between p-4 hover:no-underline">
-                                                    <div className="flex items-center gap-4">
-                                                        <IconDisplay iconName={provider.icon} className="h-6 w-6" />
-                                                        <div className="text-lg font-semibold">{provider.name}</div>
-                                                    </div>
-                                                </AccordionTrigger>
-                                                <AccordionContent className="p-4 border-t">
-                                                    <AgreementTab provider={provider} onProviderUpdate={handleProviderUpdate} />
-                                                </AccordionContent>
-                                            </AccordionItem>
-                                        ))}
-                                    </Accordion>
+                                    <Tabs defaultValue="borrower-agreement" className="space-y-4">
+                                        <TabsList>
+                                            <TabsTrigger value="borrower-agreement">Borrower Agreement</TabsTrigger>
+                                            <TabsTrigger value="delivery-agreement">Delivery Agreement</TabsTrigger>
+                                        </TabsList>
+                                        <TabsContent value="borrower-agreement">
+                                            <Accordion type="multiple" className="w-full space-y-4">
+                                                {providers.map((provider) => (
+                                                    <AccordionItem value={provider.id} key={provider.id} className="border rounded-lg bg-card">
+                                                        <AccordionTrigger className="flex w-full items-center justify-between p-4 hover:no-underline">
+                                                            <div className="flex items-center gap-4">
+                                                                <IconDisplay iconName={provider.icon} className="h-6 w-6" />
+                                                                <div className="text-lg font-semibold">{provider.name}</div>
+                                                            </div>
+                                                        </AccordionTrigger>
+                                                        <AccordionContent className="p-4 border-t">
+                                                            <AgreementTab provider={provider} onProviderUpdate={handleProviderUpdate} />
+                                                        </AccordionContent>
+                                                    </AccordionItem>
+                                                ))}
+                                            </Accordion>
+                                        </TabsContent>
+                                        <TabsContent value="delivery-agreement">
+                                            <Accordion type="multiple" className="w-full space-y-4">
+                                                {providers.map((provider) => (
+                                                    <AccordionItem value={`delivery-${provider.id}`} key={provider.id} className="border rounded-lg bg-card">
+                                                        <AccordionTrigger className="flex w-full items-center justify-between p-4 hover:no-underline">
+                                                            <div className="flex items-center gap-4">
+                                                                <IconDisplay iconName={provider.icon} className="h-6 w-6" />
+                                                                <div className="text-lg font-semibold">{provider.name}</div>
+                                                            </div>
+                                                        </AccordionTrigger>
+                                                        <AccordionContent className="p-4 border-t">
+                                                            <DeliveryAgreementTab providerId={provider.id} />
+                                                        </AccordionContent>
+                                                    </AccordionItem>
+                                                ))}
+                                            </Accordion>
+                                        </TabsContent>
+                                    </Tabs>
                                 </TabsContent>
                                 <TabsContent value="tax">
                                     <TaxTab initialTaxConfig={initialTaxConfig} />
@@ -2939,6 +2376,100 @@ function AgreementTab({ provider, onProviderUpdate }: { provider: LoanProvider, 
                 <Button onClick={handleSave} disabled={isLoading || !canEditTerms}>
                     {isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin"/> : <Save className="h-4 w-4 mr-2" />}
                     Submit New Version for Approval
+                </Button>
+            </div>
+        </div>
+    );
+}
+
+// --------------------------------------------------
+// DELIVERY AGREEMENT TAB
+// --------------------------------------------------
+function DeliveryAgreementTab({ providerId }: { providerId: string }) {
+    const { toast } = useToast();
+    const { entityActions } = usePermissions();
+    const termsActions = entityActions('TermsAndConditions');
+    const canEdit = termsActions.create || termsActions.update;
+    const [content, setContent] = useState('');
+    const [currentVersion, setCurrentVersion] = useState(0);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+
+    useEffect(() => {
+        const fetchTemplate = async () => {
+            setIsLoading(true);
+            try {
+                const res = await fetch(`/api/settings/delivery-agreement?providerId=${providerId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data) {
+                        setContent(data.content || '');
+                        setCurrentVersion(data.version || 0);
+                    }
+                }
+            } catch {
+                toast({ title: 'Error', description: 'Failed to load delivery agreement.', variant: 'destructive' });
+            } finally {
+                setIsLoading(false);
+            }
+        };
+        fetchTemplate();
+    }, [providerId, toast]);
+
+    const handleSave = async () => {
+        if (!canEdit) {
+            toast({ title: 'Not authorized', variant: 'destructive' });
+            return;
+        }
+        if (!content.trim()) {
+            toast({ title: 'Error', description: 'Delivery agreement content cannot be empty.', variant: 'destructive' });
+            return;
+        }
+        setIsSaving(true);
+        try {
+            const res = await fetch('/api/settings/delivery-agreement', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ providerId, content }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.error || 'Failed to save delivery agreement.');
+            }
+            const saved = await res.json();
+            setCurrentVersion(saved.version);
+            toast({ title: 'Saved', description: `Delivery agreement v${saved.version} published.` });
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    if (isLoading) {
+        return <div className="space-y-4">
+            <Skeleton className="h-8 w-1/4" />
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-10 w-32" />
+        </div>;
+    }
+
+    return (
+        <div className="space-y-4">
+            <Label>Delivery Agreement Content</Label>
+            <p className="text-sm text-muted-foreground">This agreement will be shown to the borrower before confirming delivery of an order.</p>
+            <Textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                placeholder="Enter the delivery agreement terms here..."
+                rows={15}
+                disabled={!canEdit}
+            />
+            <div className="flex justify-between items-center">
+                <p className="text-sm text-muted-foreground">Current Version: {currentVersion}</p>
+                <Button onClick={handleSave} disabled={isSaving || !canEdit}>
+                    {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
+                    Publish New Version
                 </Button>
             </div>
         </div>

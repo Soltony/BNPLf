@@ -12,7 +12,14 @@ export async function GET(req: NextRequest) {
     const orders = await prisma.order.findMany({
       where: { borrowerId },
       include: {
-        merchant: { select: { id: true, name: true } },
+        merchant: { select: { id: true, name: true, contactPersonName: true, contactPersonPhone: true, contactPersonEmail: true, additionalContactInfo: true } },
+        loanApplication: {
+          select: {
+            product: {
+              select: { providerId: true },
+            },
+          },
+        },
         orderItems: {
           include: {
             item: { select: { id: true, name: true, imageUrl: true, price: true } },
@@ -69,7 +76,7 @@ export async function PUT(req: NextRequest) {
       where: { id },
       data: updateData,
       include: {
-        merchant: { select: { id: true, name: true } },
+        merchant: { select: { id: true, name: true, contactPersonName: true, contactPersonPhone: true, contactPersonEmail: true, additionalContactInfo: true } },
         orderItems: { include: { item: { select: { id: true, name: true } } } },
       },
     });

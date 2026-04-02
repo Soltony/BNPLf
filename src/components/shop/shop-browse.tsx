@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Search, ShoppingCart, PlayCircle, Package, Tag, X, ChevronRight, Store } from 'lucide-react';
+import { Search, ShoppingCart, PlayCircle, Package, Tag, X, ChevronRight, Store, CreditCard } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import Link from 'next/link';
 
@@ -15,7 +15,7 @@ const MERCHANT_RESPONDED_STATUSES = ['PENDING_DELIVERY', 'ON_DELIVERY', 'CANCELL
 
 const getSeenOrderResponsesKey = (borrowerId: string) => `bnpl_seen_order_responses:${borrowerId}`;
 
-export function ShopBrowse() {
+export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const borrowerId = searchParams?.get('borrowerId') || '';
@@ -31,8 +31,20 @@ export function ShopBrowse() {
   const [merchantSearchOpen, setMerchantSearchOpen] = useState(false);
   const [showAllMerchants, setShowAllMerchants] = useState(false);
   const [orderCount, setOrderCount] = useState(0);
+  const [merchantScrollIndex, setMerchantScrollIndex] = useState(0);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const merchantSearchInputRef = useRef<HTMLInputElement>(null);
+
+  const handleMerchantScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    const max = scrollWidth - clientWidth;
+    if (max <= 0) { setMerchantScrollIndex(0); return; }
+    const pct = scrollLeft / max;
+    if (pct < 0.33) setMerchantScrollIndex(0);
+    else if (pct < 0.66) setMerchantScrollIndex(1);
+    else setMerchantScrollIndex(2);
+  };
 
   useEffect(() => {
     if (!borrowerId) return;
@@ -309,9 +321,11 @@ export function ShopBrowse() {
                 )}
               </div>
             </div>
-            <div className={shouldExpandMerchants
-              ? 'grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3'
-              : 'flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory -mx-1 px-1'}>
+            <div
+              className={shouldExpandMerchants
+                ? 'grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8 gap-3'
+                : 'flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory -mx-1 px-1'}
+              onScroll={!shouldExpandMerchants ? handleMerchantScroll : undefined}>
               {visibleMerchants.map((m) => (
                 <button
                   key={m.id}
@@ -373,6 +387,20 @@ export function ShopBrowse() {
                 </button>
               )}
             </div>
+            {!shouldExpandMerchants && merchants.length > 0 && (
+              <div className="flex items-center justify-center gap-1.5 mt-3">
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className={`h-1 rounded-full transition-all duration-300 ${
+                      merchantScrollIndex === i
+                        ? 'w-6 bg-amber-500'
+                        : 'w-2 bg-gray-300'
+                    }`}
+                  />
+                ))}
+              </div>
+            )}
             {merchantSearch.trim().length > 0 && filteredMerchants.length > 0 && (
               <p className="mt-3 text-xs text-gray-500">
                 Showing {filteredMerchants.length} merchant{filteredMerchants.length === 1 ? '' : 's'}
@@ -387,12 +415,30 @@ export function ShopBrowse() {
         )}
 
         <div className="text-center mb-5 sm:mb-10">
-          <h2 className="text-lg sm:text-2xl font-bold text-gray-900 tracking-tight">
-            {selectedMerchant ? `${selectedMerchant.name} Products` : 'Latest Products'}
-          </h2>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            Browse and select items for BNPL or Direct Payment
-          </p>
+          {hasActiveLoan ? (
+            <Link
+              href={`/loan?borrowerId=${borrowerId}`}
+              className="mx-auto flex w-full max-w-lg items-center justify-between rounded-xl bg-amber-500 px-4 py-3 text-white shadow-sm transition-colors hover:bg-amber-600"
+            >
+              <div className="flex items-center gap-2">
+                <CreditCard className="h-4 w-4" />
+                <span className="text-sm font-semibold">You have an active loan</span>
+              </div>
+              <div className="flex items-center gap-1 text-xs font-semibold">
+                View Dashboard
+                <ChevronRight className="h-3.5 w-3.5" />
+              </div>
+            </Link>
+          ) : (
+            <>
+              <h2 className="text-lg sm:text-2xl font-bold text-gray-900 tracking-tight">
+                {selectedMerchant ? `${selectedMerchant.name} Products` : 'Browse Products'}
+              </h2>
+              <p className="text-xs sm:text-sm text-gray-500 mt-1">
+                Browse and select items for BNPL or Direct Payment
+              </p>
+            </>
+          )}
         </div>
 
         {sortedItems.length === 0 && (
@@ -429,14 +475,27 @@ export function ShopBrowse() {
   );
 }
 
+function getFirstImage(imageUrl: string | null | undefined): string | null {
+  if (!imageUrl) return null;
+  const trimmed = imageUrl.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr) && arr.length > 0) return arr[0];
+    } catch { /* ignore */ }
+  }
+  return trimmed;
+}
+
 function ShopProductCard({ item, fmtCurr, isNew, onSelect }: { item: any; fmtCurr: (v: number) => string; isNew: boolean; onSelect: (id: string) => void }) {
+  const mainImage = getFirstImage(item.imageUrl);
   return (
     <Card className="group overflow-hidden border-0 shadow-sm hover:shadow-xl transition-all duration-300 rounded-xl bg-white">
       {/* Image */}
       <div className="relative aspect-square bg-gradient-to-br from-gray-50 to-gray-100 overflow-hidden">
-        {item.imageUrl ? (
+        {mainImage ? (
           <img
-            src={item.imageUrl}
+            src={mainImage}
             alt={item.name}
             className="w-full h-full object-contain p-2 group-hover:scale-105 transition-transform duration-300"
             loading="lazy"

@@ -13,16 +13,44 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Upload } from 'lucide-react';
+import { PlusCircle, Upload, Pencil, Trash2 } from 'lucide-react';
 import { useRequirePermission } from '@/hooks/use-require-permission';
 
 type TabKey = 'merchants' | 'merchant-users' | 'product-categories';
+
+// --- Validation helpers ---
+const PHONE_REGEX = /^(09\d{8}|9\d{8}|\+2519\d{8})$/;
+const ACCOUNT_NUMBER_REGEX = /^7\d{12}$/;
+
+function validateAccountNumber(value: string): string | null {
+  if (!value.trim()) return 'Account number is required.';
+  if (!ACCOUNT_NUMBER_REGEX.test(value.trim())) return 'Account number must start with 7 and be 13 characters long.';
+  return null;
+}
+
+function validatePhone(value: string): string | null {
+  if (!value.trim()) return 'Phone number is required.';
+  if (!PHONE_REGEX.test(value.trim())) return 'Invalid Ethiopian phone format. Use 0912345678, 912345678, or +251912345678.';
+  return null;
+}
+
+function validateEmail(value: string): string | null {
+  if (!value.trim()) return null; // email is optional for merchants
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())) return 'Invalid email address.';
+  return null;
+}
+
+function validateRequired(value: string, fieldName: string): string | null {
+  if (!value.trim()) return `${fieldName} is required.`;
+  return null;
+}
 
 export default function BranchPage() {
   useRequirePermission('branch');
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<TabKey>('merchants');
   const [merchants, setMerchants] = useState<any[]>([]);
+  const [pendingMerchants, setPendingMerchants] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [merchantUsers, setMerchantUsers] = useState<any[]>([]);
   const [allMerchants, setAllMerchants] = useState<any[]>([]);
@@ -41,6 +69,19 @@ export default function BranchPage() {
   const [merchantAdditionalContact, setMerchantAdditionalContact] = useState('');
   const [merchantBnplEnabled, setMerchantBnplEnabled] = useState(true);
   const [merchantStatus, setMerchantStatus] = useState('ACTIVE');
+  const [merchantErrors, setMerchantErrors] = useState<Record<string, string | null>>({});
+
+  // Merchant user form - editing
+  const [editingMerchantUser, setEditingMerchantUser] = useState<any>(null);
+  const [muEditDialogOpen, setMuEditDialogOpen] = useState(false);
+  const [muEditFullName, setMuEditFullName] = useState('');
+  const [muEditEmail, setMuEditEmail] = useState('');
+  const [muEditPhone, setMuEditPhone] = useState('');
+  const [muEditStatus, setMuEditStatus] = useState('Active');
+  const [muEditErrors, setMuEditErrors] = useState<Record<string, string | null>>({});
+
+  // Merchant user form - validation
+  const [muErrors, setMuErrors] = useState<Record<string, string | null>>({});
 
   // Category form
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
@@ -59,6 +100,27 @@ export default function BranchPage() {
     try {
       const res = await fetch('/api/merchants');
       if (res.ok) setMerchants(await res.json());
+    } catch { /* ignore */ }
+    // Also fetch pending merchant creations
+    try {
+      const res = await fetch('/api/approvals');
+      if (res.ok) {
+        const all = await res.json();
+        const pendingCreates = all.filter((pc: any) => pc.entityType === 'Merchant' && pc.changeType === 'CREATE' && pc.status === 'PENDING');
+        setPendingMerchants(pendingCreates.map((pc: any) => {
+          const payload = JSON.parse(pc.payload);
+          return {
+            id: pc.id,
+            name: payload.created?.name || 'N/A',
+            accountNumber: payload.created?.accountNumber || null,
+            contactPersonName: payload.created?.contactPersonName || null,
+            status: 'PENDING_APPROVAL',
+            iconUrl: payload.created?.iconUrl || null,
+            bnplEnabled: payload.created?.bnplEnabled,
+            _isPending: true,
+          };
+        }));
+      }
     } catch { /* ignore */ }
   }, []);
 
@@ -102,9 +164,22 @@ export default function BranchPage() {
     setMerchantAdditionalContact('');
     setMerchantBnplEnabled(true);
     setMerchantStatus('ACTIVE');
+    setMerchantErrors({});
   };
 
   const handleSaveMerchant = async () => {
+    // Validate all fields
+    const errors: Record<string, string | null> = {};
+    errors.name = validateRequired(merchantName, 'Name');
+    errors.accountNumber = validateAccountNumber(merchantAccountNumber);
+    errors.contactPersonName = validateRequired(merchantContactPersonName, 'Contact Person Name');
+    errors.contactPersonPhone = validatePhone(merchantContactPersonPhone);
+    errors.contactPersonEmail = validateEmail(merchantContactPersonEmail);
+    setMerchantErrors(errors);
+
+    const hasErrors = Object.values(errors).some(e => e !== null);
+    if (hasErrors) return;
+
     setLoading(true);
     try {
       let iconUrl: string | null = null;
@@ -198,6 +273,19 @@ export default function BranchPage() {
 
   // --- Merchant Users Tab ---
   const handleCreateMerchantUser = async () => {
+    // Validate all fields
+    const errors: Record<string, string | null> = {};
+    errors.fullName = validateRequired(muFullName, 'Full Name');
+    errors.email = muEmail.trim() ? validateEmail(muEmail) : 'Email is required.';
+    if (!muEmail.trim()) errors.email = 'Email is required.';
+    else { const emailErr = validateEmail(muEmail); if (emailErr) errors.email = emailErr; }
+    errors.phone = validatePhone(muPhone);
+    errors.merchantId = !muMerchantId ? 'Associate merchant is required.' : null;
+    setMuErrors(errors);
+
+    const hasErrors = Object.values(errors).some(e => e !== null);
+    if (hasErrors) return;
+
     setLoading(true);
     try {
       const res = await fetch('/api/users', {
@@ -217,10 +305,60 @@ export default function BranchPage() {
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed to create user'); }
       toast({ title: 'Merchant user submitted for approval' });
       setMuFullName(''); setMuEmail(''); setMuPhone(''); setMuPassword(''); setMuMerchantId('');
+      setMuErrors({});
       fetchMerchantUsers();
     } catch (e: any) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
     } finally { setLoading(false); }
+  };
+
+  const handleEditMerchantUser = async () => {
+    if (!editingMerchantUser) return;
+    const errors: Record<string, string | null> = {};
+    errors.fullName = validateRequired(muEditFullName, 'Full Name');
+    errors.email = !muEditEmail.trim() ? 'Email is required.' : validateEmail(muEditEmail);
+    errors.phone = validatePhone(muEditPhone);
+    setMuEditErrors(errors);
+    if (Object.values(errors).some(e => e !== null)) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch('/api/users', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingMerchantUser.id,
+          fullName: muEditFullName,
+          email: muEditEmail,
+          phoneNumber: muEditPhone,
+          status: muEditStatus,
+        }),
+      });
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed to update user'); }
+      toast({ title: 'Merchant user updated' });
+      setMuEditDialogOpen(false);
+      setEditingMerchantUser(null);
+      setMuEditErrors({});
+      fetchMerchantUsers();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    } finally { setLoading(false); }
+  };
+
+  const handleDeleteMerchantUser = async (id: string) => {
+    try {
+      const body = JSON.stringify({ id });
+      const res = await fetch('/api/users', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      if (!res.ok) throw new Error('Delete failed');
+      toast({ title: 'Merchant user deleted' });
+      fetchMerchantUsers();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
   };
 
   const tabs: { key: TabKey; label: string }[] = [
@@ -270,11 +408,13 @@ export default function BranchPage() {
                       <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Basic Information</h3>
                       <div>
                         <Label>Name <span className="text-red-500">*</span></Label>
-                        <Input value={merchantName} onChange={e => setMerchantName(e.target.value)} placeholder="Merchant name" />
+                        <Input value={merchantName} onChange={e => { setMerchantName(e.target.value); setMerchantErrors(prev => ({ ...prev, name: null })); }} placeholder="Merchant name" />
+                        {merchantErrors.name && <p className="text-sm text-destructive mt-1">{merchantErrors.name}</p>}
                       </div>
                       <div>
-                        <Label>Account Number</Label>
-                        <Input value={merchantAccountNumber} onChange={e => setMerchantAccountNumber(e.target.value)} placeholder="Account number" />
+                        <Label>Account Number <span className="text-red-500">*</span></Label>
+                        <Input value={merchantAccountNumber} onChange={e => { const v = e.target.value.replace(/\D/g, ''); setMerchantAccountNumber(v); setMerchantErrors(prev => ({ ...prev, accountNumber: null })); }} placeholder="Account number (starts with 7, 13 digits)" maxLength={13} />
+                        {merchantErrors.accountNumber && <p className="text-sm text-destructive mt-1">{merchantErrors.accountNumber}</p>}
                       </div>
                       <div>
                         <Label>Status</Label>
@@ -336,17 +476,20 @@ export default function BranchPage() {
                     <div className="space-y-4">
                       <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Business Deal Information</h3>
                       <div>
-                        <Label>Contact Person Name</Label>
-                        <Input value={merchantContactPersonName} onChange={e => setMerchantContactPersonName(e.target.value)} placeholder="Full name of contact person" />
+                        <Label>Contact Person Name <span className="text-red-500">*</span></Label>
+                        <Input value={merchantContactPersonName} onChange={e => { setMerchantContactPersonName(e.target.value); setMerchantErrors(prev => ({ ...prev, contactPersonName: null })); }} placeholder="Full name of contact person" />
+                        {merchantErrors.contactPersonName && <p className="text-sm text-destructive mt-1">{merchantErrors.contactPersonName}</p>}
                       </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                          <Label>Contact Person Phone</Label>
-                          <Input value={merchantContactPersonPhone} onChange={e => setMerchantContactPersonPhone(e.target.value)} placeholder="Phone number" />
+                          <Label>Contact Person Phone <span className="text-red-500">*</span></Label>
+                          <Input value={merchantContactPersonPhone} onChange={e => { setMerchantContactPersonPhone(e.target.value); setMerchantErrors(prev => ({ ...prev, contactPersonPhone: null })); }} placeholder="e.g., 0912345678" />
+                          {merchantErrors.contactPersonPhone && <p className="text-sm text-destructive mt-1">{merchantErrors.contactPersonPhone}</p>}
                         </div>
                         <div>
                           <Label>Contact Person Email</Label>
-                          <Input type="email" value={merchantContactPersonEmail} onChange={e => setMerchantContactPersonEmail(e.target.value)} placeholder="Email address" />
+                          <Input type="email" value={merchantContactPersonEmail} onChange={e => { setMerchantContactPersonEmail(e.target.value); setMerchantErrors(prev => ({ ...prev, contactPersonEmail: null })); }} placeholder="Email address" />
+                          {merchantErrors.contactPersonEmail && <p className="text-sm text-destructive mt-1">{merchantErrors.contactPersonEmail}</p>}
                         </div>
                       </div>
                     </div>
@@ -367,7 +510,7 @@ export default function BranchPage() {
 
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={() => setMerchantDialogOpen(false)}>Cancel</Button>
-                      <Button onClick={handleSaveMerchant} disabled={loading || !merchantName.trim()}>
+                      <Button onClick={handleSaveMerchant} disabled={loading}>
                         {loading ? 'Saving...' : 'Save'}
                       </Button>
                     </div>
@@ -386,7 +529,7 @@ export default function BranchPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {merchants.map(m => (
+                {[...merchants, ...pendingMerchants].map(m => (
                   <TableRow key={m.id}>
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
@@ -396,20 +539,29 @@ export default function BranchPage() {
                     </TableCell>
                     <TableCell>{m.accountNumber || '-'}</TableCell>
                     <TableCell>{m.contactPersonName || '-'}</TableCell>
-                    <TableCell><Badge variant={m.status === 'ACTIVE' ? 'default' : 'secondary'}>{m.status}</Badge></TableCell>
+                    <TableCell>
+                      <Badge variant={m.status === 'ACTIVE' ? 'default' : m.status === 'PENDING_APPROVAL' ? 'outline' : 'secondary'}>
+                        {m.status === 'PENDING_APPROVAL' ? 'Pending' : m.status}
+                      </Badge>
+                    </TableCell>
                     <TableCell className="text-right space-x-2">
-                      <Button size="sm" variant="outline" onClick={() => { setEditingMerchant(m); setMerchantName(m.name); setMerchantAccountNumber(m.accountNumber || ''); setMerchantIconPreview(m.iconUrl || ''); setMerchantContactPersonName(m.contactPersonName || ''); setMerchantContactPersonPhone(m.contactPersonPhone || ''); setMerchantContactPersonEmail(m.contactPersonEmail || ''); setMerchantAdditionalContact(m.additionalContactInfo || ''); setMerchantBnplEnabled(m.bnplEnabled !== false); setMerchantStatus(m.status || 'ACTIVE'); setMerchantDialogOpen(true); }}>Edit</Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild><Button size="sm" variant="destructive">Delete</Button></AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader><AlertDialogTitle>Delete {m.name}?</AlertDialogTitle><AlertDialogDescription>This action will submit a delete request for approval.</AlertDialogDescription></AlertDialogHeader>
-                          <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteMerchant(m.id)}>Delete</AlertDialogAction></AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
+                      {!m._isPending && (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => { setEditingMerchant(m); setMerchantName(m.name); setMerchantAccountNumber(m.accountNumber || ''); setMerchantIconPreview(m.iconUrl || ''); setMerchantContactPersonName(m.contactPersonName || ''); setMerchantContactPersonPhone(m.contactPersonPhone || ''); setMerchantContactPersonEmail(m.contactPersonEmail || ''); setMerchantAdditionalContact(m.additionalContactInfo || ''); setMerchantBnplEnabled(m.bnplEnabled !== false); setMerchantStatus(m.status || 'ACTIVE'); setMerchantDialogOpen(true); }}>Edit</Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild><Button size="sm" variant="destructive">Delete</Button></AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader><AlertDialogTitle>Delete {m.name}?</AlertDialogTitle><AlertDialogDescription>This action will submit a delete request for approval.</AlertDialogDescription></AlertDialogHeader>
+                              <AlertDialogFooter><AlertDialogCancel>Cancel</AlertDialogCancel><AlertDialogAction onClick={() => handleDeleteMerchant(m.id)}>Delete</AlertDialogAction></AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </>
+                      )}
+                      {m._isPending && <span className="text-sm text-muted-foreground">Awaiting approval</span>}
                     </TableCell>
                   </TableRow>
                 ))}
-                {merchants.length === 0 && (
+                {merchants.length === 0 && pendingMerchants.length === 0 && (
                   <TableRow><TableCell colSpan={5} className="text-center text-muted-foreground py-8">No merchants found.</TableCell></TableRow>
                 )}
               </TableBody>
@@ -427,9 +579,31 @@ export default function BranchPage() {
               <CardDescription>Create platform users with the merchant role.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div><Label>Full name</Label><Input value={muFullName} onChange={e => setMuFullName(e.target.value)} /></div>
-              <div><Label>Email</Label><Input type="email" value={muEmail} onChange={e => setMuEmail(e.target.value)} /></div>
-              <div><Label>Phone</Label><Input value={muPhone} onChange={e => setMuPhone(e.target.value)} /></div>
+              <div>
+                <Label>Associate Merchant <span className="text-red-500">*</span></Label>
+                <Select value={muMerchantId} onValueChange={(v) => { setMuMerchantId(v); setMuErrors(prev => ({ ...prev, merchantId: null })); }}>
+                  <SelectTrigger><SelectValue placeholder="Select merchant" /></SelectTrigger>
+                  <SelectContent>
+                    {allMerchants.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {muErrors.merchantId && <p className="text-sm text-destructive mt-1">{muErrors.merchantId}</p>}
+              </div>
+              <div>
+                <Label>Full name <span className="text-red-500">*</span></Label>
+                <Input value={muFullName} onChange={e => { setMuFullName(e.target.value); setMuErrors(prev => ({ ...prev, fullName: null })); }} />
+                {muErrors.fullName && <p className="text-sm text-destructive mt-1">{muErrors.fullName}</p>}
+              </div>
+              <div>
+                <Label>Email <span className="text-red-500">*</span></Label>
+                <Input type="email" value={muEmail} onChange={e => { setMuEmail(e.target.value); setMuErrors(prev => ({ ...prev, email: null })); }} />
+                {muErrors.email && <p className="text-sm text-destructive mt-1">{muErrors.email}</p>}
+              </div>
+              <div>
+                <Label>Phone <span className="text-red-500">*</span></Label>
+                <Input value={muPhone} onChange={e => { setMuPhone(e.target.value); setMuErrors(prev => ({ ...prev, phone: null })); }} placeholder="e.g., 0912345678" />
+                {muErrors.phone && <p className="text-sm text-destructive mt-1">{muErrors.phone}</p>}
+              </div>
               <div><Label>Password (optional)</Label><Input type="password" value={muPassword} onChange={e => setMuPassword(e.target.value)} /></div>
               <div>
                 <Label>Role</Label>
@@ -438,19 +612,10 @@ export default function BranchPage() {
                   <SelectContent><SelectItem value="Merchant">Merchant</SelectItem></SelectContent>
                 </Select>
               </div>
-              <div>
-                <Label>Associate Merchant</Label>
-                <Select value={muMerchantId} onValueChange={setMuMerchantId}>
-                  <SelectTrigger><SelectValue placeholder="Select merchant" /></SelectTrigger>
-                  <SelectContent>
-                    {allMerchants.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
               <p className="text-sm text-muted-foreground">Users created here will be submitted for approval and won&apos;t appear until approved.</p>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => { setMuFullName(''); setMuEmail(''); setMuPhone(''); setMuPassword(''); setMuMerchantId(''); }}>Cancel</Button>
-                <Button className="bg-amber-500 hover:bg-amber-600" onClick={handleCreateMerchantUser} disabled={loading || !muFullName || !muEmail || !muPhone}>
+                <Button variant="outline" onClick={() => { setMuFullName(''); setMuEmail(''); setMuPhone(''); setMuPassword(''); setMuMerchantId(''); setMuErrors({}); }}>Cancel</Button>
+                <Button className="bg-amber-500 hover:bg-amber-600" onClick={handleCreateMerchantUser} disabled={loading}>
                   Submit for Approval
                 </Button>
               </div>
@@ -481,7 +646,36 @@ export default function BranchPage() {
                       <TableCell>{u.phoneNumber}</TableCell>
                       <TableCell>{u.providerName || '-'}</TableCell>
                       <TableCell>{u.role}</TableCell>
-                      <TableCell>-</TableCell>
+                      <TableCell className="space-x-2">
+                        <Button size="sm" variant="outline" onClick={() => {
+                          setEditingMerchantUser(u);
+                          setMuEditFullName(u.fullName);
+                          setMuEditEmail(u.email);
+                          setMuEditPhone(u.phoneNumber);
+                          setMuEditStatus(u.status || 'Active');
+                          setMuEditErrors({});
+                          setMuEditDialogOpen(true);
+                        }}>
+                          <Pencil className="h-3 w-3 mr-1" />Edit
+                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button size="sm" variant="destructive">
+                              <Trash2 className="h-3 w-3 mr-1" />Delete
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete {u.fullName}?</AlertDialogTitle>
+                              <AlertDialogDescription>This action cannot be undone. The user will be permanently removed.</AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={() => handleDeleteMerchantUser(u.id)}>Delete</AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                      </TableCell>
                     </TableRow>
                   ))}
                   {merchantUsers.length === 0 && (
@@ -491,6 +685,46 @@ export default function BranchPage() {
               </Table>
             </CardContent>
           </Card>
+
+          {/* Edit Merchant User Dialog */}
+          <Dialog open={muEditDialogOpen} onOpenChange={(o) => { setMuEditDialogOpen(o); if (!o) { setEditingMerchantUser(null); setMuEditErrors({}); } }}>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Edit Merchant User</DialogTitle></DialogHeader>
+              <div className="space-y-4">
+                <div>
+                  <Label>Full Name <span className="text-red-500">*</span></Label>
+                  <Input value={muEditFullName} onChange={e => { setMuEditFullName(e.target.value); setMuEditErrors(prev => ({ ...prev, fullName: null })); }} />
+                  {muEditErrors.fullName && <p className="text-sm text-destructive mt-1">{muEditErrors.fullName}</p>}
+                </div>
+                <div>
+                  <Label>Email <span className="text-red-500">*</span></Label>
+                  <Input type="email" value={muEditEmail} onChange={e => { setMuEditEmail(e.target.value); setMuEditErrors(prev => ({ ...prev, email: null })); }} />
+                  {muEditErrors.email && <p className="text-sm text-destructive mt-1">{muEditErrors.email}</p>}
+                </div>
+                <div>
+                  <Label>Phone <span className="text-red-500">*</span></Label>
+                  <Input value={muEditPhone} onChange={e => { setMuEditPhone(e.target.value); setMuEditErrors(prev => ({ ...prev, phone: null })); }} placeholder="e.g., 0912345678" />
+                  {muEditErrors.phone && <p className="text-sm text-destructive mt-1">{muEditErrors.phone}</p>}
+                </div>
+                <div>
+                  <Label>Status</Label>
+                  <Select value={muEditStatus} onValueChange={setMuEditStatus}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="Inactive">Inactive</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setMuEditDialogOpen(false)}>Cancel</Button>
+                  <Button onClick={handleEditMerchantUser} disabled={loading}>
+                    {loading ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
 

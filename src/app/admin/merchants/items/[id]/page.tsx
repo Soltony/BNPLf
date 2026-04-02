@@ -37,7 +37,12 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
   const [sellingOption, setSellingOption] = useState('BNPL_ONLY');
   const [imageUrl, setImageUrl] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
-  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+
+  // Determine if the selected merchant has BNPL enabled
+  const selectedMerchant = merchants.find((m: any) => String(m.id) === String(merchantId));
+  const isBnplEnabled = selectedMerchant?.bnplEnabled === true;
 
   const [attributes, setAttributes] = useState<{ name: string; values: { id?: string; label: string; priceDelta: string }[] }[]>([]);
 
@@ -65,7 +70,22 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
         setPrice(String(item.price || ''));
         setStatus(item.status || 'ACTIVE');
         setSellingOption(item.sellingOption || 'BNPL_ONLY');
+        // Force DIRECT_ONLY if the merchant does not have BNPL enabled
+        const itemMerchant = (Array.isArray(m) ? m : []).find((x: any) => String(x.id) === String(item.merchantId));
+        if (itemMerchant && !itemMerchant.bnplEnabled) {
+          setSellingOption('DIRECT_ONLY');
+        }
         setImageUrl(item.imageUrl || '');
+        // Load existing images as previews
+        if (item.imageUrl) {
+          try {
+            const parsed = JSON.parse(item.imageUrl);
+            if (Array.isArray(parsed)) setImagePreviews(parsed);
+            else setImagePreviews([item.imageUrl]);
+          } catch {
+            setImagePreviews(item.imageUrl ? [item.imageUrl] : []);
+          }
+        }
         setVideoUrl(item.videoUrl || '');
 
         // Build attributes from option groups, preserving IDs
@@ -200,12 +220,15 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
     setLoading(true);
     try {
       let newImageUrl = imageUrl;
-      if (imageFile) {
-        const reader = new FileReader();
-        newImageUrl = await new Promise<string>((resolve) => {
-          reader.onload = () => resolve(reader.result as string);
-          reader.readAsDataURL(imageFile);
-        });
+      if (imageFiles.length > 0) {
+        const readFileAsDataUrl = (file: File): Promise<string> =>
+          new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(file);
+          });
+        const urls = await Promise.all(imageFiles.map(readFileAsDataUrl));
+        newImageUrl = JSON.stringify(urls);
       }
 
       const optionGroups = attributes.filter(a => a.name.trim()).map(a => ({
@@ -310,6 +333,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
                 <SelectContent><SelectItem value="ACTIVE">ACTIVE</SelectItem><SelectItem value="INACTIVE">INACTIVE</SelectItem></SelectContent>
               </Select>
             </div>
+            {isBnplEnabled ? (
             <div>
               <Label>Selling Option</Label>
               <Select value={sellingOption} onValueChange={setSellingOption}>
@@ -321,9 +345,35 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
                 </SelectContent>
               </Select>
             </div>
+            ) : (
             <div>
-              <Label>Image</Label>
-              <Input type="file" accept="image/*" onChange={e => setImageFile(e.target.files?.[0] || null)} />
+              <Label>Selling Option</Label>
+              <Input value="Direct Payment Only" disabled />
+            </div>
+            )}
+            <div>
+              <Label>Images (first image is the main display image)</Label>
+              <Input type="file" accept="image/*" multiple onChange={e => {
+                const files = Array.from(e.target.files || []);
+                setImageFiles(files);
+                Promise.all(files.map(f => new Promise<string>((resolve) => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve(reader.result as string);
+                  reader.readAsDataURL(f);
+                }))).then(setImagePreviews);
+              }} />
+              {imagePreviews.length > 0 && (
+                <div className="flex flex-wrap gap-3 mt-3">
+                  {imagePreviews.map((src, i) => (
+                    <div key={i} className="relative">
+                      <img src={src} alt={`Preview ${i + 1}`} className="h-20 w-20 rounded-lg border bg-white object-cover" />
+                      {i === 0 && imagePreviews.length > 1 && (
+                        <span className="absolute -top-1 -right-1 bg-orange-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-medium">Main</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <Label>Product video URL</Label>

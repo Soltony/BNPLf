@@ -13,6 +13,19 @@ const MERCHANT_RESPONDED_STATUSES = ['PENDING_DELIVERY', 'ON_DELIVERY', 'CANCELL
 
 const getSeenOrderResponsesKey = (borrowerId: string) => `bnpl_seen_order_responses:${borrowerId}`;
 
+function parseImages(imageUrl: string | null | undefined): string[] {
+  if (!imageUrl) return [];
+  const trimmed = imageUrl.trim();
+  if (trimmed.startsWith('[')) {
+    try {
+      const arr = JSON.parse(trimmed);
+      if (Array.isArray(arr)) return arr.filter((s: any) => typeof s === 'string' && s);
+    } catch { /* ignore */ }
+  }
+  if (trimmed) return [trimmed];
+  return [];
+}
+
 export function ShopItemDetail() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -26,6 +39,7 @@ export function ShopItemDetail() {
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({});
   const [orderCount, setOrderCount] = useState(0);
   const [placingOrder, setPlacingOrder] = useState(false);
+  const [selectedImageIdx, setSelectedImageIdx] = useState(0);
 
   useEffect(() => {
     if (!borrowerId) return;
@@ -220,21 +234,60 @@ export function ShopItemDetail() {
       <div className="max-w-lg mx-auto px-3 sm:px-4 py-4 sm:py-8">
         <Card className="border-0 shadow-lg rounded-2xl overflow-hidden bg-white">
           {/* Image */}
-          <div className="relative bg-gradient-to-br from-gray-50 via-white to-gray-100 p-4 sm:p-6">
-            <div className="aspect-[4/3] rounded-xl overflow-hidden">
-              {item.imageUrl ? (
-                <img
-                  src={item.imageUrl}
-                  alt={item.name}
-                  className="w-full h-full object-contain"
-                />
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-gray-300">
-                  <Package className="h-12 w-12 mb-2" />
-                  <span className="text-sm">No Image</span>
+          <div className="relative bg-gradient-to-br from-gray-50 via-white to-gray-100">
+            {(() => {
+              const images = parseImages(item.imageUrl);
+              if (images.length === 0) {
+                return (
+                  <div className="aspect-[4/3] flex flex-col items-center justify-center text-gray-300">
+                    <Package className="h-12 w-12 mb-2" />
+                    <span className="text-sm">No Image</span>
+                  </div>
+                );
+              }
+              if (images.length === 1) {
+                return (
+                  <div className="aspect-[4/3] p-4 sm:p-6">
+                    <div className="rounded-xl overflow-hidden h-full">
+                      <img src={images[0]} alt={item.name} className="w-full h-full object-contain" />
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <div>
+                  {/* Horizontal scrollable image carousel */}
+                  <div
+                    className="flex overflow-x-auto snap-x snap-mandatory scrollbar-hide"
+                    style={{ WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+                    onScroll={(e) => {
+                      const el = e.currentTarget;
+                      const idx = Math.round(el.scrollLeft / el.clientWidth);
+                      setSelectedImageIdx(idx);
+                    }}
+                  >
+                    {images.map((img: string, i: number) => (
+                      <div key={i} className="shrink-0 w-full snap-center aspect-[4/3] p-4 sm:p-6">
+                        <div className="rounded-xl overflow-hidden h-full">
+                          <img src={img} alt={`${item.name} ${i + 1}`} className="w-full h-full object-contain" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Dot indicators */}
+                  <div className="flex justify-center gap-1.5 pb-3">
+                    {images.map((_: string, i: number) => (
+                      <span
+                        key={i}
+                        className={`h-2 rounded-full transition-all duration-200 ${
+                          i === selectedImageIdx ? 'w-5 bg-amber-500' : 'w-2 bg-gray-300'
+                        }`}
+                      />
+                    ))}
+                  </div>
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {/* Discount badge */}
             {activeDiscount && (
@@ -412,13 +465,6 @@ export function ShopItemDetail() {
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">Choose payment method</p>
                     <div className="flex items-center gap-2">
                       <Button
-                        variant="outline"
-                        onClick={handleChangeItem}
-                        className="rounded-xl h-11 border-gray-200 hover:bg-gray-50 font-medium text-sm px-4"
-                      >
-                        Change item
-                      </Button>
-                      <Button
                         className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={handleChooseLoanProduct}
                         disabled={optionsIncomplete}
@@ -444,13 +490,6 @@ export function ShopItemDetail() {
                 return (
                   <div className="flex items-center gap-2 pt-1">
                     <Button
-                      variant="outline"
-                      onClick={handleChangeItem}
-                      className="flex-1 rounded-xl h-11 border-gray-200 hover:bg-gray-50 font-medium text-sm"
-                    >
-                      Change item
-                    </Button>
-                    <Button
                       className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       onClick={handlePlaceDirectOrder}
                       disabled={optionsIncomplete || placingOrder}
@@ -467,18 +506,11 @@ export function ShopItemDetail() {
               return (
                 <div className="flex items-center gap-2 pt-1">
                   <Button
-                    variant="outline"
-                    onClick={handleChangeItem}
-                    className="flex-1 rounded-xl h-11 border-gray-200 hover:bg-gray-50 font-medium text-sm"
-                  >
-                    Change item
-                  </Button>
-                  <Button
                     className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleChooseLoanProduct}
                     disabled={optionsIncomplete}
                   >
-                    Choose loan product
+                    Place order
                     <ChevronRight className="h-4 w-4 ml-1" />
                   </Button>
                 </div>

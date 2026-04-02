@@ -216,7 +216,7 @@ export default async function LoanPage({ searchParams }: { searchParams: any }) 
                     <Loader2 className="h-12 w-12 animate-spin text-primary" />
                 </div>
             }>
-                <ShopBrowse />
+                <ShopBrowse hasActiveLoan={hasActiveLoan} />
             </Suspense>
         );
     }
