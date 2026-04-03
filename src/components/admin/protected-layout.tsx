@@ -129,7 +129,12 @@ export function ProtectedLayout({ children, providers }: ProtectedLayoutProps) {
     return allMenuItems.filter((item) => {
         const moduleName = item.permissionKey || item.label.toLowerCase().replace(/\s+/g, '-');
         // Fallback for roles that might not have all permission keys yet
-        return currentUser.permissions[moduleName]?.read;
+        if (!currentUser.permissions[moduleName]?.read) return false;
+
+        // Branch-scoped users should not see the Districts page
+        if (currentUser.branchId && item.path === '/admin/districts') return false;
+
+        return true;
     });
 
   }, [currentUser]);

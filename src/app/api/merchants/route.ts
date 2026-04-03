@@ -8,7 +8,9 @@ export async function GET() {
   if (!user) return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
 
   try {
-    const merchants = await prisma.merchant.findMany({ orderBy: { createdAt: 'desc' } });
+    // Branch-scoped users only see merchants belonging to their branch
+    const where = user.branchId ? { branchId: user.branchId } : {};
+    const merchants = await prisma.merchant.findMany({ where, orderBy: { createdAt: 'desc' } });
     return NextResponse.json(merchants);
   } catch (error) {
     console.error('Error fetching merchants:', error);
@@ -18,7 +20,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromSession();
-  if (!user || !user.permissions?.['merchants']?.create) {
+  if (!user || !(user.permissions?.['merchants']?.create || user.permissions?.['branch']?.create)) {
     return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
   }
 
@@ -48,6 +50,7 @@ export async function POST(req: NextRequest) {
           additionalContactInfo: additionalContactInfo?.trim() || null,
           bnplEnabled: bnplEnabled !== false,
           status: status || 'ACTIVE',
+          branchId: user.branchId || null,
         } }),
         createdById: user.id,
       },
@@ -69,7 +72,7 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   const user = await getUserFromSession();
-  if (!user || !user.permissions?.['merchants']?.update) {
+  if (!user || !(user.permissions?.['merchants']?.update || user.permissions?.['branch']?.update)) {
     return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
   }
 
@@ -80,6 +83,11 @@ export async function PUT(req: NextRequest) {
 
     const existing = await prisma.merchant.findUnique({ where: { id } });
     if (!existing) return NextResponse.json({ error: 'Merchant not found' }, { status: 404 });
+
+    // Branch-scoped users can only update merchants that belong to their branch
+    if (user.branchId && existing.branchId !== user.branchId) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
 
     // Validate updated fields
     const finalAccountNumber = accountNumber !== undefined ? accountNumber : existing.accountNumber;
@@ -129,7 +137,7 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   const user = await getUserFromSession();
-  if (!user || !user.permissions?.['merchants']?.delete) {
+  if (!user || !(user.permissions?.['merchants']?.delete || user.permissions?.['branch']?.delete)) {
     return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
   }
 
@@ -140,6 +148,11 @@ export async function DELETE(req: NextRequest) {
 
     const existing = await prisma.merchant.findUnique({ where: { id } });
     if (!existing) return NextResponse.json({ error: 'Merchant not found' }, { status: 404 });
+
+    // Branch-scoped users can only delete merchants that belong to their branch
+    if (user.branchId && existing.branchId !== user.branchId) {
+      return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
 
     const pending = await prisma.pendingChange.create({
       data: {

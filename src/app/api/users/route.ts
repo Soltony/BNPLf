@@ -26,14 +26,21 @@ const userSchema = z.object({
 
 export async function GET() {
     const user = await getUserFromSession();
-    if (!user || !user.permissions?.['access-control']?.read) {
+    const hasAccessControl = !!user?.permissions?.['access-control']?.read;
+    const hasBranchPerm = !!user?.permissions?.['branch']?.read;
+    if (!user || !(hasAccessControl || hasBranchPerm)) {
         return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
   try {
     // Horizontal access control: non-super-admins can only see users of their own provider or unassigned users
     const whereClause: any = {};
-    if (user.role !== 'Super Admin' && user.loanProviderId) {
+    if (user.branchId && !hasAccessControl) {
+        // Branch users can only see merchant-role users tied to merchants of their branch
+        const branchMerchants = await prisma.merchant.findMany({ where: { branchId: user.branchId }, select: { id: true } });
+        const merchantIds = branchMerchants.map(m => m.id);
+        whereClause.merchantId = { in: merchantIds };
+    } else if (user.role !== 'Super Admin' && user.loanProviderId) {
         whereClause.OR = [
             { loanProviderId: user.loanProviderId },
             { loanProviderId: null }
@@ -75,7 +82,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
     const user = await getUserFromSession();
-    if (!user || !user.permissions?.['access-control']?.create) {
+    if (!user || !(user.permissions?.['access-control']?.create || user.permissions?.['branch']?.create)) {
         return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
@@ -161,6 +168,14 @@ export async function POST(req: NextRequest) {
       dataToCreate.merchantId = merchantId;
     }
 
+    // Branch-scoped users: ensure the merchant belongs to their branch
+    if (user.branchId && merchantId) {
+      const merchant = await prisma.merchant.findUnique({ where: { id: merchantId }, select: { branchId: true } });
+      if (!merchant || merchant.branchId !== user.branchId) {
+        return NextResponse.json({ error: 'You can only create users for merchants in your branch.' }, { status: 403 });
+      }
+    }
+
 
     const newUser = await prisma.user.create({
       data: dataToCreate,
@@ -220,7 +235,7 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
     const user = await getUserFromSession();
-    if (!user || !user.permissions?.['access-control']?.update) {
+    if (!user || !(user.permissions?.['access-control']?.update || user.permissions?.['branch']?.update)) {
         return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 
@@ -364,7 +379,7 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
     const user = await getUserFromSession();
-    if (!user || !user.permissions?.['access-control']?.delete) {
+    if (!user || !(user.permissions?.['access-control']?.delete || user.permissions?.['branch']?.delete)) {
         return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
     }
 

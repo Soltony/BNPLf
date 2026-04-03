@@ -15,6 +15,7 @@ export async function GET(req: NextRequest) {
       role: user.role,
       permissions: user.permissions || {},
       passwordChangeRequired: user.passwordChangeRequired || false,
+      branchId: user.branchId || null,
     });
   } catch (err) {
     console.error('Session API error:', err);

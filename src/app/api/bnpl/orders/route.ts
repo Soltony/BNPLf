@@ -276,12 +276,19 @@ export async function PUT(req: NextRequest) {
           data: { status: 'DISBURSED' },
         });
 
-        // ── Disbursement Transaction & External Call ──
+        // ── Disbursement to Merchant Account ──
         const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? 'PRO0001';
-        const activeAccount = await prisma.phoneAccount.findFirst({
-          where: { phoneNumber: loanApp.borrowerId, isActive: true },
+
+        // Credit the merchant's account (not the borrower's)
+        const merchant = await prisma.merchant.findUnique({
+          where: { id: order.merchantId },
+          select: { accountNumber: true, name: true },
         });
-        const creditAccount = activeAccount?.accountNumber || '';
+        const creditAccount = merchant?.accountNumber || '';
+
+        if (!creditAccount) {
+          console.error(`Merchant ${order.merchantId} has no account number for BNPL disbursement`);
+        }
 
         if (creditAccount) {
           const disbursement = await prisma.disbursementTransaction.create({
@@ -297,6 +304,7 @@ export async function PUT(req: NextRequest) {
                 providerId: forcedProviderId,
                 amount: loanAmount,
                 loanId: createdLoan.id,
+                merchantId: order.merchantId,
               }),
             } as any,
           });

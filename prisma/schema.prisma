@@ -750,6 +750,7 @@ model Branch {
   status         String          @default("ACTIVE")
   stockLocations StockLocation[]
   users          User[]
+  merchants      Merchant[]
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -760,6 +761,8 @@ model Merchant {
   id                    String   @id @default(cuid())
   name                  String   @unique
   accountNumber         String?  @unique
+  branchId              String?
+  branch                Branch?  @relation(fields: [branchId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   iconUrl               String?  @db.Text
   contactPersonName     String?
   contactPersonPhone    String?

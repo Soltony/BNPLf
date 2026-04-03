@@ -274,6 +274,22 @@ export default async function middleware(req: NextRequest) {
 
     let permissions: Permissions = session.permissions || {};
 
+    // Branch-scoped users must not access the Districts page or its APIs
+    if (session.branchId && (path.startsWith('/admin/districts') || path.startsWith('/api/districts'))) {
+      if (path.startsWith('/api/')) {
+        return withSecurityHeaders(
+          NextResponse.json({ error: 'Forbidden' }, { status: 403 }),
+          cspHeader,
+          nonce
+        );
+      }
+      return withSecurityHeaders(
+        NextResponse.redirect(new URL('/admin/branch', req.nextUrl.origin)),
+        cspHeader,
+        nonce
+      );
+    }
+
     const PERMISSION_MAP: Record<string, string> = {};
     const ORDERED_ADMIN_PAGES: string[] = [];
     for (const item of allMenuItems) {
