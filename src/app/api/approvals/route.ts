@@ -9,6 +9,7 @@ import { createAuditLog } from "@/lib/audit-log";
 import ExcelJS from "exceljs";
 import { toCamelCase } from "@/lib/utils";
 import { Prisma } from "@prisma/client";
+import { normalizeDiscountEndDate, normalizeDiscountStartDate } from "@/lib/discount-utils";
 
 const approvalSchema = z.object({
   changeId: z.string(),
@@ -1556,8 +1557,8 @@ async function applyChange(
             itemId: d.itemId,
             categoryId: d.categoryId,
             minQuantity: d.minQuantity ?? 1,
-            startDate: d.startDate ? new Date(d.startDate) : null,
-            endDate: d.endDate ? new Date(d.endDate) : null,
+            startDate: normalizeDiscountStartDate(d.startDate),
+            endDate: normalizeDiscountEndDate(d.endDate),
             status: d.status || 'ACTIVE',
           },
         });
@@ -1574,8 +1575,8 @@ async function applyChange(
             itemId: u.itemId,
             categoryId: u.categoryId,
             minQuantity: u.minQuantity,
-            startDate: u.startDate ? new Date(u.startDate) : null,
-            endDate: u.endDate ? new Date(u.endDate) : null,
+            startDate: normalizeDiscountStartDate(u.startDate),
+            endDate: normalizeDiscountEndDate(u.endDate),
             status: u.status,
           },
         });

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { isDiscountActive, pickBestDiscount } from '@/lib/discount-utils';
 
 export async function GET(req: NextRequest) {
   try {
@@ -26,15 +27,7 @@ export async function GET(req: NextRequest) {
         merchant: { select: { id: true, name: true } },
         category: { select: { id: true, name: true } },
         variants: { where: { status: 'ACTIVE' } },
-        discountRules: {
-          where: {
-            status: 'ACTIVE',
-            OR: [
-              { startDate: null },
-              { startDate: { lte: new Date() } },
-            ],
-          },
-        },
+        discountRules: { where: { status: 'ACTIVE' } },
       },
       orderBy: { createdAt: 'desc' },
     });
@@ -46,36 +39,28 @@ export async function GET(req: NextRequest) {
         status: 'ACTIVE',
         categoryId: { not: null },
         itemId: null,
-        AND: [
-          { OR: [{ startDate: null }, { startDate: { lte: now } }] },
-          { OR: [{ endDate: null }, { endDate: { gte: now } }] },
-        ],
       },
     });
 
     // Merge item-level + category-level discounts and compute best discount
     const itemsWithDiscounts = items.map(item => {
       const itemDiscounts = item.discountRules.filter(rule =>
-        !rule.endDate || new Date(rule.endDate) >= now
+        isDiscountActive(rule, now) && (!rule.merchantId || rule.merchantId === item.merchantId)
       );
       const catDiscounts = item.categoryId
-        ? categoryDiscounts.filter(r => r.categoryId === item.categoryId && r.minQuantity <= 1)
+        ? categoryDiscounts.filter(r =>
+            r.categoryId === item.categoryId &&
+            r.minQuantity <= 1 &&
+            isDiscountActive(r, now) &&
+            (!r.merchantId || r.merchantId === item.merchantId)
+          )
         : [];
       const allDiscounts = [...itemDiscounts, ...catDiscounts];
 
-      // Pick the best discount (highest effective value)
-      let bestDiscount: { type: string; value: number; name: string } | null = null;
-      if (allDiscounts.length > 0) {
-        for (const d of allDiscounts) {
-          const t = d.type.toUpperCase();
-          let effective = 0;
-          if (t === 'PERCENTAGE') effective = (Number(item.price) * d.value) / 100;
-          else if (t === 'FIXED') effective = d.value;
-          if (!bestDiscount || effective > ((bestDiscount.type === 'PERCENTAGE' ? (Number(item.price) * bestDiscount.value) / 100 : bestDiscount.value))) {
-            bestDiscount = { type: t, value: d.value, name: d.name };
-          }
-        }
-      }
+      const selectedDiscount = pickBestDiscount(Number(item.price), allDiscounts);
+      const bestDiscount = selectedDiscount
+        ? { type: String(selectedDiscount.type || '').toUpperCase(), value: selectedDiscount.value, name: selectedDiscount.name }
+        : null;
 
       const discountedPrice = bestDiscount
         ? Math.max(0, bestDiscount.type === 'PERCENTAGE'

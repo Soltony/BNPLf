@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { calculateTotalRepayable } from '@/lib/loan-calculator';
 import { addDays } from 'date-fns';
+import { getDiscountEffectiveAmount, isDiscountActive, pickBestDiscount } from '@/lib/discount-utils';
 
 export async function GET(req: NextRequest) {
   try {
@@ -392,6 +393,7 @@ export async function POST(req: NextRequest) {
 
     let totalAmount = 0;
     const orderItemsData: any[] = [];
+    const orderItemScopes: Array<{ merchantId: string | null; categoryId: string | null }> = [];
 
     for (const orderItem of items) {
       const item = await prisma.item.findUnique({
@@ -438,33 +440,32 @@ export async function POST(req: NextRequest) {
         lineTotal,
         optionSelections: optionSelections.length ? { create: optionSelections } : undefined,
       });
+      orderItemScopes.push({ merchantId: item.merchantId, categoryId: item.categoryId });
     }
 
     // Apply discount rules
-    for (const oid of orderItemsData) {
+    for (const [index, oid] of orderItemsData.entries()) {
+      const scope = orderItemScopes[index];
+      const now = new Date();
       const discounts = await prisma.discountRule.findMany({
         where: {
           status: 'ACTIVE',
-          OR: [{ itemId: oid.itemId }, { categoryId: null, itemId: null }],
-          AND: [
-            { OR: [{ startDate: null }, { startDate: { lte: new Date() } }] },
-            { OR: [{ endDate: null }, { endDate: { gte: new Date() } }] },
+          OR: [
+            { itemId: oid.itemId },
+            ...(scope?.categoryId ? [{ categoryId: scope.categoryId, itemId: null }] : []),
           ],
+          ...(scope?.merchantId ? { merchantId: scope.merchantId } : {}),
           minQuantity: { lte: oid.quantity },
         },
-        orderBy: { value: 'desc' },
       });
 
-      if (discounts.length > 0) {
-        const discount = discounts[0];
-        if (discount.type === 'percentage' || discount.type === 'PERCENT') {
-          const discountAmount = (oid.lineTotal * discount.value) / 100;
-          totalAmount -= discountAmount;
-          oid.lineTotal -= discountAmount;
-        } else if (discount.type === 'fixed' || discount.type === 'FIXED') {
-          totalAmount -= discount.value;
-          oid.lineTotal -= discount.value;
-        }
+      const applicableDiscounts = discounts.filter(discount => isDiscountActive(discount, now));
+      const discount = pickBestDiscount(oid.lineTotal, applicableDiscounts);
+
+      if (discount) {
+        const discountAmount = getDiscountEffectiveAmount(oid.lineTotal, discount);
+        totalAmount -= discountAmount;
+        oid.lineTotal -= discountAmount;
       }
     }
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
+import { isDiscountActive, pickBestDiscount } from '@/lib/discount-utils';
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,20 +12,14 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
         category: { select: { id: true, name: true } },
         variants: { where: { status: 'ACTIVE' }, orderBy: { createdAt: 'asc' } },
         optionGroups: { include: { values: true }, orderBy: { createdAt: 'asc' } },
-        discountRules: {
-          where: {
-            status: 'ACTIVE',
-            OR: [{ startDate: null }, { startDate: { lte: new Date() } }],
-          },
-        },
+        discountRules: { where: { status: 'ACTIVE' } },
       },
     });
 
     if (!item) return NextResponse.json({ error: 'Item not found' }, { status: 404 });
 
     const now = new Date();
-    // Filter expired item-level discount rules
-    const itemDiscounts = item.discountRules.filter(r => !r.endDate || new Date(r.endDate) >= now);
+    const itemDiscounts = item.discountRules.filter(r => isDiscountActive(r, now) && (!r.merchantId || r.merchantId === item.merchantId));
 
     // Also fetch category-level discounts
     let catDiscounts: any[] = [];
@@ -34,27 +29,17 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
           status: 'ACTIVE',
           categoryId: item.categoryId,
           itemId: null,
-          AND: [
-            { OR: [{ startDate: null }, { startDate: { lte: now } }] },
-            { OR: [{ endDate: null }, { endDate: { gte: now } }] },
-          ],
+          OR: [{ merchantId: item.merchantId }, { merchantId: null }],
         },
       });
     }
 
-    const allDiscounts = [...itemDiscounts, ...catDiscounts];
+    const allDiscounts = [...itemDiscounts, ...catDiscounts.filter(r => isDiscountActive(r, now))];
 
-    // Pick the best discount
-    let bestDiscount: { type: string; value: number; name: string } | null = null;
-    for (const d of allDiscounts) {
-      const t = d.type.toUpperCase();
-      let effective = 0;
-      if (t === 'PERCENTAGE') effective = (Number(item.price) * d.value) / 100;
-      else if (t === 'FIXED') effective = d.value;
-      if (!bestDiscount || effective > (bestDiscount.type === 'PERCENTAGE' ? (Number(item.price) * bestDiscount.value) / 100 : bestDiscount.value)) {
-        bestDiscount = { type: t, value: d.value, name: d.name };
-      }
-    }
+    const selectedDiscount = pickBestDiscount(Number(item.price), allDiscounts);
+    const bestDiscount = selectedDiscount
+      ? { type: String(selectedDiscount.type || '').toUpperCase(), value: selectedDiscount.value, name: selectedDiscount.name }
+      : null;
 
     return NextResponse.json({ ...item, discountRules: allDiscounts, bestDiscount });
   } catch (error) {
