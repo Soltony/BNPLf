@@ -39,7 +39,7 @@ const ENTITY_TO_MODULE: Record<string, string[]> = {
   itemvariant: ['merchants'],
   discountrule: ['merchants'],
   order: ['orders', 'merchants'],
-  stocklocation: ['branch'],
+  stocklocation: ['branch', 'merchants'],
   inventorylevel: ['merchants', 'branch'],
   district: ['branch'],
   branch: ['branch'],

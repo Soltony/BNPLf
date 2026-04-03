@@ -2,10 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { getUserFromSession } from '@/lib/user';
 import { createAuditLog } from '@/lib/audit-log';
+import { hasPermissionForEntity } from '@/lib/permissions';
 
 export async function GET() {
   const user = await getUserFromSession();
-  if (!user) return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+  if (!user || !hasPermissionForEntity(user, 'StockLocation', 'read')) {
+    return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+  }
 
   try {
     const where: any = {};
@@ -26,7 +29,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromSession();
-  if (!user || !user.permissions?.['branch']?.create) {
+  if (!user || !hasPermissionForEntity(user, 'StockLocation', 'create')) {
     return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
   }
 
@@ -65,7 +68,7 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   const user = await getUserFromSession();
-  if (!user || !user.permissions?.['branch']?.update) {
+  if (!user || !hasPermissionForEntity(user, 'StockLocation', 'update')) {
     return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
   }
 
@@ -110,7 +113,7 @@ export async function PUT(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   const user = await getUserFromSession();
-  if (!user || !user.permissions?.['branch']?.delete) {
+  if (!user || !hasPermissionForEntity(user, 'StockLocation', 'delete')) {
     return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
   }
 

@@ -1592,6 +1592,7 @@ async function applyChange(
             address: loc.address,
             contactInfo: loc.contactInfo,
             branchId: loc.branchId,
+            merchantId: loc.merchantId,
             status: loc.status || 'ACTIVE',
           },
         });
