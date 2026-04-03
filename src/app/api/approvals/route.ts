@@ -1552,6 +1552,7 @@ async function applyChange(
             value: d.value,
             buyX: d.buyX,
             getY: d.getY,
+            merchantId: d.merchantId,
             itemId: d.itemId,
             categoryId: d.categoryId,
             minQuantity: d.minQuantity ?? 1,
