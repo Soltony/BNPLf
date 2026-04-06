@@ -265,6 +265,7 @@ model Borrower {
   agreements              BorrowerAgreement[]
   loanApplications        LoanApplication[]
   pendingPayments         PendingPayment[]
+  directPendingPayments   DirectPendingPayment[]
   accountStatements       AccountStatement[]
   accountStatementMetrics AccountStatementMetrics[]
   orders                  Order[]
@@ -772,6 +773,7 @@ model Merchant {
   status                String   @default("PENDING_APPROVAL")
   items                 Item[]
   orders                Order[]
+  directPendingPayments DirectPendingPayment[]
   users                 User[]
   discountRules         DiscountRule[]
   stockLocations        StockLocation[]
@@ -897,10 +899,11 @@ model Order {
   cancelledBy       String?
   totalAmount       Float            @default(0)
   currency          String           @default("ETB")
-  orderItems        OrderItem[]
-  deliveryOtps      DeliveryOtp[]
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  orderItems            OrderItem[]
+  deliveryOtps          DeliveryOtp[]
+  directPendingPayments DirectPendingPayment[]
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
 
   @@index([borrowerId])
   @@index([merchantId])
@@ -983,6 +986,43 @@ model CombinationInventoryLevel {
   @@unique([itemId, locationId, combinationKey])
   @@index([itemId])
   @@index([locationId])
+}
+
+// --------------------------------------
+// DIRECT PAYMENT GATEWAY
+// (Separate from BNPL loan repayment tables)
+// --------------------------------------
+
+// Tracks pending direct payments for orders (not loan repayments)
+model DirectPendingPayment {
+  id            String   @id @default(cuid())
+  transactionId String   @unique
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  borrowerId    String
+  borrower      Borrower @relation(fields: [borrowerId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  merchantId    String
+  merchant      Merchant @relation(fields: [merchantId], references: [id], onUpdate: NoAction, onDelete: NoAction)
+  amount        Float
+  status        String   @default("PENDING") // PENDING, COMPLETED, FAILED
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([borrowerId])
+}
+
+// Logs upstream payment gateway callbacks for direct payments
+model DirectPaymentTransaction {
+  id            String   @id @default(cuid())
+  transactionId String   @unique
+  txnRef        String?
+  orderId       String?
+  status        String // RECEIVED, PROCESSED, FAILED_VALIDATION
+  payload       String   @db.NVarChar(Max)
+  receivedAt    DateTime @default(now())
+
+  @@index([orderId])
 }
 
 // --------------------------------------

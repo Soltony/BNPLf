@@ -93,15 +93,34 @@ export async function POST(req: Request) {
     }
 
     const body: Body = await req.json();
-    const { creditAccount, providerId, amount, loanId } = body;
+    const { creditAccount: requestedCreditAccount, providerId, amount, loanId } = body;
     // For testing: force the provider id to PRO0001 unless overridden by env
     const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? "PRO0001";
     const sendProviderId = forcedProviderId;
-    if (!creditAccount || !providerId || !amount)
+    if (!requestedCreditAccount || !providerId || !amount)
       return NextResponse.json(
         { error: "creditAccount, providerId and amount are required" },
         { status: 400 }
       );
+
+    // ── BNPL: If the loan has an associated order, credit the merchant instead of the borrower ──
+    let creditAccount = requestedCreditAccount;
+    if (loanId) {
+      try {
+        const order = await prisma.order.findFirst({
+          where: { loanId },
+          include: { merchant: { select: { accountNumber: true, name: true } } },
+        });
+        if (order?.merchant?.accountNumber) {
+          console.log(
+            `[external][disbursement] BNPL order detected – crediting merchant "${order.merchant.name}" (${order.merchant.accountNumber}) instead of borrower (${requestedCreditAccount})`
+          );
+          creditAccount = order.merchant.accountNumber;
+        }
+      } catch (e) {
+        console.error("[external][disbursement] failed to resolve merchant account, falling back to borrower", e);
+      }
+    }
 
     const apiUrl = process.env.EXTERNAL_DISBURSEMENT_URL;
     const user = process.env.EXTERNAL_API_USERNAME;
@@ -397,14 +416,28 @@ export async function POST(req: Request) {
       console.error("[external][disbursement] saving transaction failed", e);
     }
 
-    // Attempt to send SMS notification to the phone tied to the credited account (fire-and-forget)
+    // Attempt to send SMS notification to the borrower (fire-and-forget)
     (async () => {
       try {
-        // Find phone by account mapping
-        const phoneMap = await prisma.phoneAccount.findFirst({
-          where: { accountNumber: String(creditAccount) },
-        });
-        const phoneNumber = phoneMap?.phoneNumber ?? null;
+        // For BNPL orders (merchant credited), notify the borrower via their phone account
+        // For regular loans (borrower credited), notify the borrower via the credited account
+        let phoneNumber: string | null = null;
+        const isMerchantCredit = creditAccount !== requestedCreditAccount;
+
+        if (isMerchantCredit) {
+          // BNPL: find borrower's phone via the original (borrower) account
+          const phoneMap = await prisma.phoneAccount.findFirst({
+            where: { accountNumber: String(requestedCreditAccount) },
+          });
+          phoneNumber = phoneMap?.phoneNumber ?? null;
+        } else {
+          // Regular: find phone via the credited account (borrower)
+          const phoneMap = await prisma.phoneAccount.findFirst({
+            where: { accountNumber: String(creditAccount) },
+          });
+          phoneNumber = phoneMap?.phoneNumber ?? null;
+        }
+
         if (!phoneNumber) {
           // No mapping found; nothing to notify
           return;
@@ -414,7 +447,11 @@ export async function POST(req: Request) {
         let message = "";
         const amt = amount ?? "";
         if (res.ok) {
-          message = `Your loan request of ETB ${amt} has been successfully disbursed to your account ${creditAccount}. Thank you for choosing NIBtera Loan.`;
+          if (isMerchantCredit) {
+            message = `Your BNPL loan of ETB ${amt} has been successfully disbursed to the merchant. Thank you for choosing NIBtera Loan.`;
+          } else {
+            message = `Your loan request of ETB ${amt} has been successfully disbursed to your account ${creditAccount}. Thank you for choosing NIBtera Loan.`;
+          }
         } else {
           const reason =
             payload &&
@@ -424,7 +461,7 @@ export async function POST(req: Request) {
               : typeof payload === "string"
               ? payload
               : txt ?? "Unknown error";
-          message = `Your loan request of ETB ${amt} could not be disbursed to your account ${creditAccount}. Please try again later or contact NIBtera Loan support for assistance.`;
+          message = `Your loan request of ETB ${amt} could not be processed. Please try again later or contact NIBtera Loan support for assistance.`;
         }
         const smsRes = await sendSms(phoneNumber, message);
         if (!smsRes.ok)

@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash, randomUUID } from 'crypto';
 import { format } from 'date-fns';
@@ -7,25 +6,32 @@ import { createAuditLog } from '@/lib/audit-log';
 import { getSession } from '@/lib/session';
 import { auditExternalApiRequest, auditExternalApiResponse, newAuditCorrelationId } from '@/lib/audit-log';
 
+/**
+ * POST /api/direct-payment/initiate
+ *
+ * Initiates a direct (non-BNPL) payment through the NIB payment gateway.
+ * This is completely separate from the loan-repayment flow; it uses
+ * DirectPendingPayment / DirectPaymentTransaction tables.
+ *
+ * Body: { orderId: string; amount: number }
+ */
 export async function POST(req: NextRequest) {
-    
-    // initiate payment request received (log removed to reduce console noise)
-
     // --- Step 1: Environment Validation ---
-    const CALLBACK_URL = process.env.CALLBACK_URL;
+    const CALLBACK_URL = process.env.CALLBACK_URL; // e.g. https://nibteraloan.nibbank.com.et/api/payment-callback
     const COMPANY_NAME = process.env.COMPANY_NAME;
     const NIB_PAYMENT_KEY = process.env.NIB_PAYMENT_KEY;
     const NIB_PAYMENT_URL = process.env.NIB_PAYMENT_URL;
 
-    // environment variables check (log removed to reduce console noise)
-
     if (!CALLBACK_URL || !COMPANY_NAME || !NIB_PAYMENT_KEY || !NIB_PAYMENT_URL) {
-        console.error('❌ Missing payment gateway environment variables.');
+        console.error('❌ Missing direct payment gateway environment variables.');
         return NextResponse.json(
             { error: 'Payment gateway is not configured on the server.' },
-            { status: 500 }
+            { status: 500 },
         );
     }
+
+    // Derive the direct-payment callback from the existing CALLBACK_URL base
+    const DIRECT_CALLBACK_URL = CALLBACK_URL.replace(/\/api\/payment-callback\/?$/, '/api/direct-payment/callback');
 
     try {
         const ipAddress = req.headers.get('x-forwarded-for') || 'N/A';
@@ -33,122 +39,107 @@ export async function POST(req: NextRequest) {
 
         // --- Step 2: Parse Request ---
         const body = await req.json();
+        const { orderId, amount } = body;
 
-        const { amount, loanId } = body;
-        if (!amount || !loanId) {
-            console.error('❌ Missing amount or loanId in the request.');
-            return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
+        if (!orderId || !amount) {
+            return NextResponse.json({ error: 'Missing orderId or amount.' }, { status: 400 });
         }
 
-        // --- Step 3: Fetch Loan Data ---
-        const loan = await prisma.loan.findUnique({
-            where: { id: loanId },
-            select: {
-                borrowerId: true,
-                product: {
-                    select: {
-                        provider: {
-                            select: { accountNumber: true },
-                        },
-                    },
-                },
+        // --- Step 3: Fetch Order + Merchant ---
+        const order = await prisma.order.findUnique({
+            where: { id: orderId },
+            include: {
+                merchant: { select: { id: true, accountNumber: true, name: true } },
             },
         });
 
-        if (!loan) {
-            return NextResponse.json({ error: 'Loan not found.' }, { status: 404 });
+        if (!order) {
+            return NextResponse.json({ error: 'Order not found.' }, { status: 404 });
+        }
+        if (order.paymentType !== 'DIRECT') {
+            return NextResponse.json({ error: 'This order is not a direct payment order.' }, { status: 400 });
         }
 
-        const ACCOUNT_NO = loan.product.provider.accountNumber;
-        if (!ACCOUNT_NO) {
-            console.error('❌ Loan provider does not have an account number configured.');
+        const merchantAccountNo = order.merchant?.accountNumber;
+        if (!merchantAccountNo) {
+            console.error('❌ Merchant does not have an account number configured.');
             return NextResponse.json(
-                { error: 'The loan provider does not have a debit account configured.' },
-                { status: 500 }
+                { error: 'The merchant does not have a receiving account configured.' },
+                { status: 500 },
             );
         }
 
-        // --- Step 4: Retrieve Session ---
+        // --- Step 4: Retrieve Session (super app token) ---
         const session = await getSession();
-
         const superAppToken = session?.superAppToken;
 
         if (!superAppToken) {
-            console.error('❌ Super App authorization token is missing or malformed.');
             return NextResponse.json(
-                {
-                    error:
-                        'Your session has expired or is invalid. Please reconnect from the main app.',
-                    sessionData: session,
-                },
-                { status: 401 }
+                { error: 'Your session has expired or is invalid. Please reconnect from the main app.' },
+                { status: 401 },
             );
         }
-
-        const token = superAppToken;
 
         // --- Step 5: Generate Transaction Info ---
         const transactionId = randomUUID();
         const transactionTime = format(new Date(), 'yyyyMMddHHmmss');
 
         const signatureString = [
-            `accountNo=${ACCOUNT_NO}`,
+            `accountNo=${merchantAccountNo}`,
             `amount=${amount}`,
-            `callBackURL=${CALLBACK_URL}`,
+            `callBackURL=${DIRECT_CALLBACK_URL}`,
             `companyName=${COMPANY_NAME}`,
             `Key=${NIB_PAYMENT_KEY}`,
-            `token=${token}`,
+            `token=${superAppToken}`,
             `transactionId=${transactionId}`,
             `transactionTime=${transactionTime}`,
         ].join('&');
 
-        // signature string built (log removed to reduce console noise)
-
         const signature = createHash('sha256').update(signatureString, 'utf8').digest('hex');
-        // generated signature (log removed to reduce console noise)
 
         const payload = {
-            accountNo: ACCOUNT_NO,
+            accountNo: merchantAccountNo,
             amount: String(amount),
-            callBackURL: CALLBACK_URL,
+            callBackURL: DIRECT_CALLBACK_URL,
             companyName: COMPANY_NAME,
-            token: token,
+            token: superAppToken,
             transactionId,
             transactionTime,
             signature,
         };
-        // final payload prepared for payment gateway (log removed to reduce console noise)
 
-        // --- Step 6: Save Pending Payment ---
-        await prisma.pendingPayment.create({
+        // --- Step 6: Save DirectPendingPayment ---
+        await (prisma as any).directPendingPayment.create({
             data: {
                 transactionId,
-                loanId,
-                borrowerId: loan.borrowerId,
+                orderId,
+                borrowerId: order.borrowerId,
+                merchantId: order.merchantId,
                 amount,
                 status: 'PENDING',
             },
         });
 
         await createAuditLog({
-            actorId: loan.borrowerId,
-            action: 'PAYMENT_GATEWAY_REQUEST',
-            entity: 'LOAN',
-            entityId: loanId,
-            details: { transactionId, amount },
+            actorId: order.borrowerId,
+            action: 'DIRECT_PAYMENT_GATEWAY_REQUEST',
+            entity: 'ORDER',
+            entityId: orderId,
+            details: { transactionId, amount, merchantId: order.merchantId },
         });
 
         // --- Step 7: Send to Payment Gateway ---
         const correlationId = newAuditCorrelationId();
         const startedAt = Date.now();
+
         await auditExternalApiRequest(
             {
-                actorId: loan.borrowerId,
+                actorId: order.borrowerId,
                 ipAddress,
                 userAgent,
-                integration: 'PAYMENT_GATEWAY',
-                entity: 'LOAN',
-                entityId: loanId,
+                integration: 'DIRECT_PAYMENT_GATEWAY',
+                entity: 'ORDER',
+                entityId: orderId,
                 correlationId,
             },
             {
@@ -159,13 +150,13 @@ export async function POST(req: NextRequest) {
                     Authorization: `Bearer ${superAppToken}`,
                 },
                 body: {
-                    accountNo: ACCOUNT_NO,
+                    accountNo: merchantAccountNo,
                     amount: String(amount),
-                    callBackURL: CALLBACK_URL,
+                    callBackURL: DIRECT_CALLBACK_URL,
                     companyName: COMPANY_NAME,
                     transactionId,
                     transactionTime,
-                    token,
+                    token: superAppToken,
                     signature,
                 },
             },
@@ -196,12 +187,12 @@ export async function POST(req: NextRequest) {
 
         await auditExternalApiResponse(
             {
-                actorId: loan.borrowerId,
+                actorId: order.borrowerId,
                 ipAddress,
                 userAgent,
-                integration: 'PAYMENT_GATEWAY',
-                entity: 'LOAN',
-                entityId: loanId,
+                integration: 'DIRECT_PAYMENT_GATEWAY',
+                entity: 'ORDER',
+                entityId: orderId,
                 correlationId,
             },
             {
@@ -223,17 +214,13 @@ export async function POST(req: NextRequest) {
             },
         ).catch(() => null);
 
-        // payment gateway response status (log removed)
-
         if (!paymentResponse.ok) {
             const errorData = await paymentResponse.text();
-            console.error('❌ PAYMENT GATEWAY ERROR RESPONSE:', errorData);
+            console.error('❌ DIRECT PAYMENT GATEWAY ERROR:', errorData);
             throw new Error(`Payment gateway request failed: ${errorData}`);
         }
 
         const responseData = await paymentResponse.json();
-        // payment gateway response body received (log removed)
-
         const paymentToken = responseData.token;
 
         if (!paymentToken) {
@@ -242,7 +229,7 @@ export async function POST(req: NextRequest) {
 
         return NextResponse.json({ paymentToken, transactionId });
     } catch (error) {
-        console.error('💥 Error initiating payment:', error);
+        console.error('💥 Error initiating direct payment:', error);
         const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
         return NextResponse.json({ error: errorMessage }, { status: 500 });
     }

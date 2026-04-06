@@ -363,7 +363,7 @@ export async function GET(request: NextRequest) {
         const totalPaid =
           principalPaid + interestPaid + serviceFeePaid + penaltyPaid;
 
-        const configuredDebit = process.env.ACCOUNT_NO || null;
+        const configuredDebit = (je.loan as any)?.product?.provider?.accountNumber || null;
         let debitAccounts = configuredDebit
           ? [configuredDebit]
           : (je.entries

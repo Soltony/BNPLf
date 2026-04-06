@@ -258,24 +258,43 @@ function BnplOrdersPageInner() {
     }
   };
 
-  // Direct payment flow: post order amount directly to the super app mini app payment
+  // Direct payment flow: initiate payment through the NIB payment gateway (mini app)
   const handleDirectPayment = async (order: any) => {
     setPaymentProcessing(true);
     try {
+      // Call the dedicated direct-payment initiation API
+      const res = await fetch('/api/direct-payment/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          amount: order.totalAmount,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to initiate payment.');
+      }
+
+      const { paymentToken, transactionId } = await res.json();
+
+      // Post payment token to Super App mini app channel
       if (typeof window !== 'undefined' && window.myJsChannel?.postMessage) {
         window.myJsChannel.postMessage(JSON.stringify({
           action: 'pay',
+          paymentToken,
+          transactionId,
           orderId: order.id,
           amount: order.totalAmount,
           currency: order.currency || 'ETB',
           merchantName: order.merchant?.name || '',
         }));
-        // Confirm delivery after payment is initiated
-        await confirmDelivered(order.id);
+
         closeDeliveryDialog();
         toast({
           title: 'Processing Payment',
-          description: 'Your payment request has been sent to the Super App.',
+          description: 'Your payment request has been sent. You will be notified once it is confirmed.',
         });
       } else {
         throw new Error('Could not communicate with the payment app. Please open this page inside the Super App.');
