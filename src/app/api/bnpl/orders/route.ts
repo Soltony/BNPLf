@@ -3,6 +3,7 @@ import prisma from '@/lib/prisma';
 import { calculateTotalRepayable } from '@/lib/loan-calculator';
 import { addDays } from 'date-fns';
 import { getDiscountEffectiveAmount, isDiscountActive, pickBestDiscount } from '@/lib/discount-utils';
+import { areDisbursementsEnabled } from '@/lib/disbursement-control';
 
 export async function GET(req: NextRequest) {
   try {
@@ -309,51 +310,92 @@ export async function PUT(req: NextRequest) {
             } as any,
           });
 
-          try {
-            const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || process.env.VERCEL_URL || 'http://localhost:3000';
-            const disRes = await fetch(`${baseUrl}/api/external/disbursement`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                creditAccount,
-                providerId: forcedProviderId,
-                amount: loanAmount,
-                loanId: createdLoan.id,
-              }),
-            });
-
-            if (disRes.ok) {
-              // The external route already updates the record via findOrCreateDisbursementTransaction,
-              // but we also set SUCCESS here as a safety net.
-              await prisma.disbursementTransaction.update({
-                where: { id: disbursement.id },
-                data: { disbursementStatus: 'SUCCESS' },
-              });
-            } else {
-              const errBody = await disRes.text().catch(() => null);
-              console.error('External disbursement failed for BNPL order:', id, 'status:', disRes.status, 'body:', errBody);
-              // Update the record to FAILED so it doesn't stay PENDING forever
-              await prisma.disbursementTransaction.update({
-                where: { id: disbursement.id },
-                data: {
-                  disbursementStatus: 'FAILED',
-                  statusCode: disRes.status,
-                  responsePayload: errBody || undefined,
-                  rawResponse: errBody || undefined,
-                } as any,
-              });
-            }
-          } catch (disErr: any) {
-            console.error('Error calling external disbursement:', disErr);
-            // Update the record to FAILED so it doesn't stay PENDING forever
+          // Call CBS directly instead of self-fetching /api/external/disbursement
+          const cbsEnabled = await areDisbursementsEnabled();
+          if (!cbsEnabled) {
+            console.error('[bnpl][disbursement] Disbursements are currently disabled');
             await prisma.disbursementTransaction.update({
               where: { id: disbursement.id },
               data: {
                 disbursementStatus: 'FAILED',
-                responsePayload: JSON.stringify({ error: 'Self-fetch failed', details: String(disErr?.message ?? disErr) }),
-                rawResponse: String(disErr?.message ?? disErr),
+                responsePayload: JSON.stringify({ error: 'Disbursements are currently disabled.' }),
+                rawResponse: 'Disbursements are currently disabled.',
+                statusCode: 503,
               } as any,
-            }).catch((e: any) => console.error('Failed to mark disbursement as FAILED:', e));
+            });
+          } else {
+            const cbsApiUrl = process.env.EXTERNAL_DISBURSEMENT_URL;
+            const cbsUser = process.env.EXTERNAL_API_USERNAME;
+            const cbsPass = process.env.EXTERNAL_API_PASSWORD;
+            const cbsAuth = cbsUser && cbsPass
+              ? 'Basic ' + Buffer.from(`${cbsUser}:${cbsPass}`).toString('base64')
+              : undefined;
+
+            if (!cbsApiUrl) {
+              console.error('[bnpl][disbursement] Missing EXTERNAL_DISBURSEMENT_URL env var');
+              await prisma.disbursementTransaction.update({
+                where: { id: disbursement.id },
+                data: {
+                  disbursementStatus: 'FAILED',
+                  responsePayload: JSON.stringify({ error: 'Missing EXTERNAL_DISBURSEMENT_URL env var' }),
+                  rawResponse: 'Missing EXTERNAL_DISBURSEMENT_URL env var',
+                } as any,
+              });
+            } else {
+              try {
+                const cbsRes = await fetch(cbsApiUrl, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    ...(cbsAuth ? { Authorization: cbsAuth } : {}),
+                  },
+                  body: JSON.stringify({
+                    creditAccount,
+                    providerId: forcedProviderId,
+                    amount: loanAmount,
+                  }),
+                });
+
+                const cbsTxt = await cbsRes.text().catch(() => null);
+                let cbsPayload: any = null;
+                try { cbsPayload = cbsTxt ? JSON.parse(cbsTxt) : null; } catch { cbsPayload = cbsTxt; }
+
+                // Extract transactionId from CBS response
+                let cbsTransactionId: string | null = null;
+                if (cbsPayload && typeof cbsPayload === 'object') {
+                  cbsTransactionId = cbsPayload.transactionId ?? cbsPayload.transactionid ?? cbsPayload.transaction_id ?? null;
+                }
+
+                const isSuccess = cbsRes.ok && cbsRes.status >= 200 && cbsRes.status < 300;
+
+                await prisma.disbursementTransaction.update({
+                  where: { id: disbursement.id },
+                  data: {
+                    transactionId: cbsTransactionId ?? undefined,
+                    disbursementStatus: isSuccess ? 'SUCCESS' : 'FAILED',
+                    responsePayload: typeof cbsPayload === 'string'
+                      ? cbsPayload
+                      : cbsPayload ? JSON.stringify(cbsPayload) : undefined,
+                    rawResponse: cbsTxt ?? undefined,
+                    statusCode: cbsRes.status,
+                  } as any,
+                });
+
+                if (!isSuccess) {
+                  console.error('CBS disbursement failed for BNPL order:', id, 'status:', cbsRes.status);
+                }
+              } catch (cbsErr: any) {
+                console.error('Error calling CBS for BNPL disbursement:', cbsErr);
+                await prisma.disbursementTransaction.update({
+                  where: { id: disbursement.id },
+                  data: {
+                    disbursementStatus: 'FAILED',
+                    responsePayload: JSON.stringify({ error: 'CBS fetch failed', details: String(cbsErr?.message ?? cbsErr) }),
+                    rawResponse: String(cbsErr?.message ?? cbsErr),
+                  } as any,
+                }).catch((e: any) => console.error('Failed to mark disbursement as FAILED:', e));
+              }
+            }
           }
         }
       } catch (loanErr) {
