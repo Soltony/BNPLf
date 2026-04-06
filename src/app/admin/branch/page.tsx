@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Upload, Pencil, Trash2 } from 'lucide-react';
+import { PlusCircle, Upload, Pencil, Trash2, Eye, EyeOff, RotateCcw, Send } from 'lucide-react';
 import { useRequirePermission } from '@/hooks/use-require-permission';
 
 type TabKey = 'merchants' | 'merchant-users' | 'product-categories';
@@ -96,6 +96,7 @@ export default function BranchPage() {
   const [muPassword, setMuPassword] = useState('');
   const [muRole, setMuRole] = useState('Merchant');
   const [muMerchantId, setMuMerchantId] = useState('');
+  const [showMuPassword, setShowMuPassword] = useState(false);
 
   const fetchMerchants = useCallback(async () => {
     try {
@@ -303,7 +304,17 @@ export default function BranchPage() {
           merchantId: muMerchantId || undefined,
         }),
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed to create user'); }
+      if (!res.ok) {
+        const err = await res.json();
+        const msg = err.error || 'Failed to create user';
+        // Surface specific field errors inline
+        if (msg.toLowerCase().includes('email already exists')) {
+          setMuErrors(prev => ({ ...prev, email: msg }));
+        } else if (msg.toLowerCase().includes('phone number already exists')) {
+          setMuErrors(prev => ({ ...prev, phone: msg }));
+        }
+        throw new Error(msg);
+      }
       toast({ title: 'Merchant user submitted for approval' });
       setMuFullName(''); setMuEmail(''); setMuPhone(''); setMuPassword(''); setMuMerchantId('');
       setMuErrors({});
@@ -336,7 +347,16 @@ export default function BranchPage() {
           merchantId: muEditMerchantId || null,
         }),
       });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error || 'Failed to update user'); }
+      if (!res.ok) {
+        const err = await res.json();
+        const msg = err.error || 'Failed to update user';
+        if (msg.toLowerCase().includes('email already exists')) {
+          setMuEditErrors(prev => ({ ...prev, email: msg }));
+        } else if (msg.toLowerCase().includes('phone number already exists')) {
+          setMuEditErrors(prev => ({ ...prev, phone: msg }));
+        }
+        throw new Error(msg);
+      }
       toast({ title: 'Merchant user updated' });
       setMuEditDialogOpen(false);
       setEditingMerchantUser(null);
@@ -358,6 +378,40 @@ export default function BranchPage() {
       if (!res.ok) throw new Error('Delete failed');
       toast({ title: 'Merchant user deleted' });
       fetchMerchantUsers();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleResendMerchantSms = async (userId: string, userName: string) => {
+    try {
+      const res = await fetch('/api/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, action: 'resend-sms' }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to resend SMS');
+      }
+      toast({ title: 'SMS Sent', description: `Login credentials resent to ${userName}` });
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleResetMerchantPassword = async (userId: string, userName: string) => {
+    try {
+      const res = await fetch('/api/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, action: 'reset-password' }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to reset password');
+      }
+      toast({ title: 'Password Reset', description: `New password sent via SMS to ${userName}` });
     } catch (e: any) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
     }
@@ -606,7 +660,27 @@ export default function BranchPage() {
                 <Input value={muPhone} onChange={e => { setMuPhone(e.target.value); setMuErrors(prev => ({ ...prev, phone: null })); }} placeholder="e.g., 0912345678" />
                 {muErrors.phone && <p className="text-sm text-destructive mt-1">{muErrors.phone}</p>}
               </div>
-              <div><Label>Password (optional)</Label><Input type="password" value={muPassword} onChange={e => setMuPassword(e.target.value)} /></div>
+              <div>
+                <Label>Password (optional — auto-generated if empty)</Label>
+                <div className="relative">
+                  <Input
+                    type={showMuPassword ? 'text' : 'password'}
+                    value={muPassword}
+                    onChange={e => setMuPassword(e.target.value)}
+                    placeholder="Leave blank to auto-generate"
+                    className="pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                    onClick={() => setShowMuPassword(!showMuPassword)}
+                  >
+                    {showMuPassword ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                  </Button>
+                </div>
+              </div>
               <div>
                 <Label>Role</Label>
                 <Select value={muRole} onValueChange={setMuRole}>
@@ -648,36 +722,68 @@ export default function BranchPage() {
                       <TableCell>{u.phoneNumber}</TableCell>
                       <TableCell>{u.merchantName || u.providerName || '-'}</TableCell>
                       <TableCell>{u.role}</TableCell>
-                      <TableCell className="space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => {
-                          setEditingMerchantUser(u);
-                          setMuEditFullName(u.fullName);
-                          setMuEditEmail(u.email);
-                          setMuEditPhone(u.phoneNumber);
-                          setMuEditStatus(u.status || 'Active');
-                          setMuEditMerchantId(u.merchantId || '');
-                          setMuEditErrors({});
-                          setMuEditDialogOpen(true);
-                        }}>
-                          <Pencil className="h-3 w-3 mr-1" />Edit
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="sm" variant="destructive">
-                              <Trash2 className="h-3 w-3 mr-1" />Delete
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete {u.fullName}?</AlertDialogTitle>
-                              <AlertDialogDescription>This action cannot be undone. The user will be permanently removed.</AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDeleteMerchantUser(u.id)}>Delete</AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 px-2"
+                            title="Resend SMS"
+                            onClick={() => handleResendMerchantSms(u.id, u.fullName)}
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="ghost" className="h-8 px-2" title="Reset Password">
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Reset password for {u.fullName}?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  A new password will be generated and sent via SMS to {u.phoneNumber}.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleResetMerchantPassword(u.id, u.fullName)}>
+                                  Reset Password
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                          <Button size="sm" variant="outline" className="h-8" onClick={() => {
+                            setEditingMerchantUser(u);
+                            setMuEditFullName(u.fullName);
+                            setMuEditEmail(u.email);
+                            setMuEditPhone(u.phoneNumber);
+                            setMuEditStatus(u.status || 'Active');
+                            setMuEditMerchantId(u.merchantId || '');
+                            setMuEditErrors({});
+                            setMuEditDialogOpen(true);
+                          }}>
+                            <Pencil className="h-3 w-3 mr-1" />Edit
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="destructive" className="h-8">
+                                <Trash2 className="h-3 w-3 mr-1" />Delete
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Delete {u.fullName}?</AlertDialogTitle>
+                                <AlertDialogDescription>This action cannot be undone. The user will be permanently removed.</AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeleteMerchantUser(u.id)}>Delete</AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Eye, EyeOff } from 'lucide-react';
 import type { User, UserRole, UserStatus, Role, LoanProvider } from '@/lib/types';
 
 interface AddUserDialogProps {
@@ -51,6 +52,7 @@ export function AddUserDialog({ isOpen, onClose, onSave, user, roles, providers,
   const [pwError, setPwError] = useState<string | null>(null);
   const pwnedAbort = useRef<AbortController | null>(null);
   const [pwFocused, setPwFocused] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const [phoneTouched, setPhoneTouched] = useState(false);
   const [phoneError, setPhoneError] = useState<string | null>(null);
@@ -297,17 +299,29 @@ export function AddUserDialog({ isOpen, onClose, onSave, user, roles, providers,
             <Label htmlFor="password" className="text-right">
                 {user ? 'New Password' : 'Password'}
             </Label>
-            <Input 
-                id="password" 
-                type="password" 
-                value={formData.password} 
-                onChange={handleChange} 
-                onFocus={() => setPwFocused(true)}
-                onBlur={() => setPwFocused(false)}
-                className="col-span-3" 
-                required={!user} // Only required for new users
-                placeholder={user ? 'Optional: Enter to reset' : ''}
-            />
+            <div className="col-span-3 relative">
+              <Input 
+                  id="password" 
+                  type={showPassword ? 'text' : 'password'} 
+                  value={formData.password} 
+                  onChange={handleChange} 
+                  onFocus={() => setPwFocused(true)}
+                  onBlur={() => setPwFocused(false)}
+                  className="pr-10" 
+                  required={!user}
+                  placeholder={user ? 'Optional: Enter to reset' : ''}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                onClick={() => setShowPassword(!showPassword)}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+              </Button>
+            </div>
           </div>
           {/* Inline password validation UI (show on focus or when there's content) */}
           {(pwFocused || (formData.password && formData.password.length > 0)) && (

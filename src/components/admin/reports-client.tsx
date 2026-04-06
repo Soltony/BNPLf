@@ -685,8 +685,10 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
               r.borrowerId ||
               "",
             "Debit Account": r.debitAccount,
-            "Credit Account (Customer Account)":
-              r.borrowerAccount || r.creditAccount,
+            "Credit Account":
+              r.disbursementCreditAccount || r.creditAccount,
+            "Customer Account":
+              r.borrowerAccount || r.borrowerId || "",
             "Txn Status":
               r.disbursementOutcome ||
               r.disbursementStatusText ||
@@ -1414,7 +1416,8 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
                   </TableHead>
                   <TableHead>Customer Name</TableHead>
                   <TableHead>Debit Account</TableHead>
-                  <TableHead>Credit Account (Customer Account)</TableHead>
+                  <TableHead>Credit Account</TableHead>
+                  <TableHead>Customer Account</TableHead>
                   <TableHead>Txn Status</TableHead>
                   <TableHead>CBS Reference</TableHead>
                   <TableHead className="text-right">
@@ -1458,7 +1461,7 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={13} className="h-24 text-center">
+                    <TableCell colSpan={14} className="h-24 text-center">
                       <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                     </TableCell>
                   </TableRow>
@@ -1493,7 +1496,10 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
                           {row.debitAccount}
                         </TableCell>
                         <TableCell className="font-mono">
-                          {row.borrowerAccount || row.creditAccount}
+                          {row.disbursementCreditAccount || row.creditAccount}
+                        </TableCell>
+                        <TableCell className="font-mono">
+                          {row.borrowerAccount || row.borrowerId}
                         </TableCell>
                         <TableCell>
                           {row.disbursementOutcome ||
@@ -1531,7 +1537,7 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
                   })
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={13} className="h-24 text-center">
+                    <TableCell colSpan={14} className="h-24 text-center">
                       No results found for the selected filters.
                     </TableCell>
                   </TableRow>

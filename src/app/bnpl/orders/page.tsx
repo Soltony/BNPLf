@@ -346,7 +346,17 @@ function BnplOrdersPageInner() {
   // Get first item for summary display
   const getFirstItem = (o: any) => {
     const first = o.orderItems?.[0];
-    return first ? { name: first.item?.name || 'Item', imageUrl: first.item?.imageUrl } : { name: 'Order', imageUrl: null };
+    if (!first) return { name: 'Order', imageUrl: null };
+    const raw = first.item?.imageUrl;
+    let imageUrl = raw || null;
+    // imageUrl may be a JSON array like '["url1","url2"]'
+    if (imageUrl && imageUrl.trim().startsWith('[')) {
+      try {
+        const arr = JSON.parse(imageUrl);
+        imageUrl = Array.isArray(arr) && arr.length > 0 ? arr[0] : null;
+      } catch { /* use raw */ }
+    }
+    return { name: first.item?.name || 'Item', imageUrl };
   };
 
   const getOrdersForTab = (tabValue: (typeof orderStatusTabs)[number]['value']) => {
@@ -396,6 +406,7 @@ function BnplOrdersPageInner() {
                     src={firstItem.imageUrl}
                     alt={firstItem.name}
                     className="w-12 h-12 rounded-lg object-cover border"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                   />
                 )}
                 <div className="flex-1 min-w-0">

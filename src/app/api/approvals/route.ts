@@ -1433,6 +1433,29 @@ async function applyChange(
       }
       break;
 
+    case "DeliveryAgreementTemplate":
+      if (changeType === "CREATE") {
+        const { providerId, content, version } = data.created;
+        await prisma.$transaction(async (tx) => {
+          // Deactivate all previous versions
+          await tx.deliveryAgreementTemplate.updateMany({
+            where: { providerId },
+            data: { isActive: false },
+          });
+          // Create the new version as active
+          await tx.deliveryAgreementTemplate.create({
+            data: {
+              providerId,
+              content,
+              version,
+              isActive: true,
+              publishedAt: new Date(),
+            },
+          });
+        });
+      }
+      break;
+
     case "Merchant":
       if (changeType === "CREATE") {
         const { id: _mid, createdAt: _mca, updatedAt: _mua, ...merchantData } = data.created;

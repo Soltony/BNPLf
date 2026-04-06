@@ -229,6 +229,17 @@ export async function POST(req: NextRequest) {
     if (error instanceof ZodError) {
       return NextResponse.json({ error: 'Invalid request', issues: error.errors }, { status: 400 });
     }
+    // Specific P2002 (unique constraint) error handling
+    if ((error as any)?.code === 'P2002') {
+      const target = (error as any).meta?.target;
+      if (Array.isArray(target) && target.includes('email')) {
+        return NextResponse.json({ error: 'A user with this email already exists.' }, { status: 409 });
+      }
+      if (Array.isArray(target) && target.includes('phoneNumber')) {
+        return NextResponse.json({ error: 'A user with this phone number already exists.' }, { status: 409 });
+      }
+      return NextResponse.json({ error: 'A user with these details already exists.' }, { status: 409 });
+    }
     return handleApiError(error, { operation: 'POST /api/users' });
   }
 }
@@ -374,6 +385,96 @@ export async function PUT(req: NextRequest) {
     await createAuditLog({ actorId: user.id, action: 'USER_UPDATE_FAILED', entity: 'USER', details: failureLogDetails, ipAddress, userAgent });
     console.error(JSON.stringify({ ...failureLogDetails, action: 'USER_UPDATE_FAILED', actorId: user.id }));
     return handleApiError(error, { operation: 'PUT /api/users', info: { userId: body?.id } });
+  }
+}
+
+// ── PATCH: Resend SMS or Reset Password ────────────────────────────────────
+export async function PATCH(req: NextRequest) {
+  const user = await getUserFromSession();
+  if (!user || !(user.permissions?.['access-control']?.update || user.permissions?.['branch']?.update)) {
+    return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+  }
+
+  const ipAddress = req.ip || req.headers.get('x-forwarded-for') || 'N/A';
+  const userAgent = req.headers.get('user-agent') || 'N/A';
+
+  try {
+    const { id, action } = await req.json();
+    if (!id || !action) {
+      return NextResponse.json({ error: 'Missing id or action' }, { status: 400 });
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+      include: { role: true },
+    });
+    if (!targetUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    // Horizontal access control
+    if (user.role !== 'Super Admin' && user.loanProviderId) {
+      if (targetUser.loanProviderId && targetUser.loanProviderId !== user.loanProviderId) {
+        return NextResponse.json({ error: 'You do not have permission to manage this user.' }, { status: 403 });
+      }
+    }
+
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.CALLBACK_URL?.replace(/\/api\/.*$/, '') || 'https://nibteraloan.nibbank.com.et';
+
+    if (action === 'resend-sms') {
+      if (!targetUser.phoneNumber) {
+        return NextResponse.json({ error: 'User has no phone number' }, { status: 400 });
+      }
+
+      const smsText = `NIB BNPL: Your account credentials.\nLogin: ${appUrl}/admin/login\nEmail: ${targetUser.email}\nPlease use your existing password or contact admin if you forgot it.`;
+      await sendSms(targetUser.phoneNumber, smsText);
+
+      await createAuditLog({
+        actorId: user.id,
+        action: 'USER_SMS_RESENT',
+        entity: 'USER',
+        entityId: targetUser.id,
+        details: { targetEmail: targetUser.email },
+        ipAddress,
+        userAgent,
+      });
+
+      return NextResponse.json({ message: 'SMS sent successfully' });
+    }
+
+    if (action === 'reset-password') {
+      const newPassword = Math.random().toString(36).slice(2) + Math.random().toString(36).toUpperCase().slice(2) + '!1';
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      await prisma.user.update({
+        where: { id },
+        data: { password: hashedPassword, passwordChangeRequired: true },
+      });
+
+      // Revoke existing sessions
+      try { await revokeAllUserSessions(id); } catch { /* ignore */ }
+
+      if (targetUser.phoneNumber) {
+        const smsText = `NIB BNPL: Your password has been reset.\nLogin: ${appUrl}/admin/login\nEmail: ${targetUser.email}\nNew Password: ${newPassword}\nPlease change your password on first login.`;
+        await sendSms(targetUser.phoneNumber, smsText);
+      }
+
+      await createAuditLog({
+        actorId: user.id,
+        action: 'USER_PASSWORD_RESET',
+        entity: 'USER',
+        entityId: targetUser.id,
+        details: { targetEmail: targetUser.email },
+        ipAddress,
+        userAgent,
+      });
+
+      return NextResponse.json({ message: 'Password reset and SMS sent' });
+    }
+
+    return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+  } catch (error) {
+    return handleApiError(error, { operation: 'PATCH /api/users' });
   }
 }
 

@@ -2394,6 +2394,7 @@ function DeliveryAgreementTab({ providerId }: { providerId: string }) {
     const [currentVersion, setCurrentVersion] = useState(0);
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
+    const [pendingApproval, setPendingApproval] = useState<{ id: string; createdBy: string; createdAt: string } | null>(null);
 
     useEffect(() => {
         const fetchTemplate = async () => {
@@ -2402,10 +2403,11 @@ function DeliveryAgreementTab({ providerId }: { providerId: string }) {
                 const res = await fetch(`/api/settings/delivery-agreement?providerId=${providerId}`);
                 if (res.ok) {
                     const data = await res.json();
-                    if (data) {
-                        setContent(data.content || '');
-                        setCurrentVersion(data.version || 0);
+                    if (data?.template) {
+                        setContent(data.template.content || '');
+                        setCurrentVersion(data.template.version || 0);
                     }
+                    setPendingApproval(data?.pending || null);
                 }
             } catch {
                 toast({ title: 'Error', description: 'Failed to load delivery agreement.', variant: 'destructive' });
@@ -2434,11 +2436,16 @@ function DeliveryAgreementTab({ providerId }: { providerId: string }) {
             });
             if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                throw new Error(err.error || 'Failed to save delivery agreement.');
+                throw new Error(err.error || 'Failed to submit delivery agreement.');
             }
             const saved = await res.json();
-            setCurrentVersion(saved.version);
-            toast({ title: 'Saved', description: `Delivery agreement v${saved.version} published.` });
+            toast({ title: 'Submitted for Approval', description: `Delivery agreement v${saved.version} submitted and awaiting approval.` });
+            // Refresh to show pending status
+            const refreshRes = await fetch(`/api/settings/delivery-agreement?providerId=${providerId}`);
+            if (refreshRes.ok) {
+                const refreshData = await refreshRes.json();
+                setPendingApproval(refreshData?.pending || null);
+            }
         } catch (error: any) {
             toast({ title: 'Error', description: error.message, variant: 'destructive' });
         } finally {
@@ -2458,6 +2465,12 @@ function DeliveryAgreementTab({ providerId }: { providerId: string }) {
         <div className="space-y-4">
             <Label>Delivery Agreement Content</Label>
             <p className="text-sm text-muted-foreground">This agreement will be shown to the borrower before confirming delivery of an order.</p>
+            {pendingApproval && (
+                <div className="rounded-md border border-orange-300 bg-orange-50 p-3 text-sm">
+                    <p className="font-medium text-orange-800">Pending Approval</p>
+                    <p className="text-orange-700">A new version was submitted by {pendingApproval.createdBy} and is awaiting approval.</p>
+                </div>
+            )}
             <Textarea
                 value={content}
                 onChange={(e) => setContent(e.target.value)}
@@ -2467,9 +2480,9 @@ function DeliveryAgreementTab({ providerId }: { providerId: string }) {
             />
             <div className="flex justify-between items-center">
                 <p className="text-sm text-muted-foreground">Current Version: {currentVersion}</p>
-                <Button onClick={handleSave} disabled={isSaving || !canEdit}>
+                <Button onClick={handleSave} disabled={isSaving || !canEdit || !!pendingApproval}>
                     {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
-                    Publish New Version
+                    {pendingApproval ? 'Pending Approval' : 'Submit for Approval'}
                 </Button>
             </div>
         </div>

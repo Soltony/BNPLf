@@ -21,7 +21,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
-import { PlusCircle, Upload, Building2, MapPin, Users, ChevronRight, FileSpreadsheet } from 'lucide-react';
+import { PlusCircle, Upload, Building2, MapPin, Users, ChevronRight, FileSpreadsheet, Eye, EyeOff, RotateCcw, Send } from 'lucide-react';
 import { useRequirePermission } from '@/hooks/use-require-permission';
 
 type TabKey = 'districts-branches' | 'branch-user-access';
@@ -100,6 +100,7 @@ export default function DistrictsPage() {
   const [buEditPhone, setBuEditPhone] = useState('');
   const [buEditStatus, setBuEditStatus] = useState('Active');
 
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Pagination state
@@ -403,6 +404,40 @@ export default function DistrictsPage() {
       if (!res.ok) throw new Error('Delete failed');
       toast({ title: 'Branch user removed' });
       await fetchBranchUsers();
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleResendSms = async (userId: string, userName: string) => {
+    try {
+      const res = await fetch('/api/districts/branch-users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, action: 'resend-sms' }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to resend SMS');
+      }
+      toast({ title: 'SMS Sent', description: `Login credentials resent to ${userName}` });
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+  };
+
+  const handleResetPassword = async (userId: string, userName: string) => {
+    try {
+      const res = await fetch('/api/districts/branch-users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: userId, action: 'reset-password' }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to reset password');
+      }
+      toast({ title: 'Password Reset', description: `New password sent via SMS to ${userName}` });
     } catch (e: any) {
       toast({ title: 'Error', description: e.message, variant: 'destructive' });
     }
@@ -868,12 +903,24 @@ export default function DistrictsPage() {
               </div>
               <div>
                 <Label>Password (optional — auto-generated if empty)</Label>
-                <Input
-                  type="password"
-                  value={buPassword}
-                  onChange={(e) => setBuPassword(e.target.value)}
-                  placeholder="Leave blank to auto-generate"
-                />
+                <div className="relative">
+                  <Input
+                    type={showPassword ? 'text' : 'password'}
+                    value={buPassword}
+                    onChange={(e) => setBuPassword(e.target.value)}
+                    placeholder="Leave blank to auto-generate"
+                    className="pr-10"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
+                    onClick={() => setShowPassword(!showPassword)}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
+                  </Button>
+                </div>
               </div>
               <div>
                 <Label>
@@ -984,46 +1031,78 @@ export default function DistrictsPage() {
                           {u.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right space-x-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setEditingBranchUser(u);
-                            setBuEditBranchId(u.branchId || '');
-                            setBuEditFullName(u.fullName);
-                            setBuEditEmail(u.email);
-                            setBuEditPhone(u.phoneNumber);
-                            setBuEditStatus(u.status);
-                            // Find the district for the current branch
-                            const currentBranch = allBranches.find(b => b.id === u.branchId);
-                            setBuEditDistrictId(currentBranch?.districtId || '');
-                            setBranchUserDialogOpen(true);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button size="sm" variant="destructive">
-                              Remove
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Remove {u.fullName}?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently delete this user account. This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDeleteBranchUser(u.id)}>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 px-2"
+                            title="Resend SMS"
+                            onClick={() => handleResendSms(u.id, u.fullName)}
+                          >
+                            <Send className="h-3.5 w-3.5" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="ghost" className="h-8 px-2" title="Reset Password">
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Reset password for {u.fullName}?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  A new password will be generated and sent via SMS to {u.phoneNumber}.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleResetPassword(u.id, u.fullName)}>
+                                  Reset Password
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8"
+                            onClick={() => {
+                              setEditingBranchUser(u);
+                              setBuEditBranchId(u.branchId || '');
+                              setBuEditFullName(u.fullName);
+                              setBuEditEmail(u.email);
+                              setBuEditPhone(u.phoneNumber);
+                              setBuEditStatus(u.status);
+                              const currentBranch = allBranches.find(b => b.id === u.branchId);
+                              setBuEditDistrictId(currentBranch?.districtId || '');
+                              setBranchUserDialogOpen(true);
+                            }}
+                          >
+                            Edit
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="destructive" className="h-8">
                                 Remove
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>Remove {u.fullName}?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will permanently delete this user account. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDeleteBranchUser(u.id)}>
+                                  Remove
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

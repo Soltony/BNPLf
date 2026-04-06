@@ -45,11 +45,22 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Missing orderId or amount.' }, { status: 400 });
         }
 
-        // --- Step 3: Fetch Order + Merchant ---
+        // --- Step 3: Fetch Order + Merchant + Provider (for collection account) ---
         const order = await prisma.order.findUnique({
             where: { id: orderId },
             include: {
                 merchant: { select: { id: true, accountNumber: true, name: true } },
+                loanApplication: {
+                    select: {
+                        product: {
+                            select: {
+                                provider: {
+                                    select: { id: true, collectionAccount: true, accountNumber: true },
+                                },
+                            },
+                        },
+                    },
+                },
             },
         });
 
@@ -60,11 +71,30 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'This order is not a direct payment order.' }, { status: 400 });
         }
 
-        const merchantAccountNo = order.merchant?.accountNumber;
-        if (!merchantAccountNo) {
-            console.error('❌ Merchant does not have an account number configured.');
+        // For direct payments, use the Collection Account from the provider.
+        // Fallback: try the provider linked via loanApplication, then find the first active provider.
+        let receivingAccount: string | null = null;
+
+        // Try from the order's loanApplication -> product -> provider
+        const linkedProvider = (order as any).loanApplication?.product?.provider;
+        if (linkedProvider?.collectionAccount) {
+            receivingAccount = linkedProvider.collectionAccount;
+        }
+
+        // Fallback: fetch the first active provider's collection account
+        if (!receivingAccount) {
+            const provider = await prisma.loanProvider.findFirst({
+                where: { status: 'ACTIVE' },
+                select: { collectionAccount: true, accountNumber: true },
+                orderBy: { displayOrder: 'asc' },
+            });
+            receivingAccount = provider?.collectionAccount || provider?.accountNumber || null;
+        }
+
+        if (!receivingAccount) {
+            console.error('❌ No collection account configured on the provider for direct payment.');
             return NextResponse.json(
-                { error: 'The merchant does not have a receiving account configured.' },
+                { error: 'No collection account is configured for receiving direct payments.' },
                 { status: 500 },
             );
         }
@@ -85,7 +115,7 @@ export async function POST(req: NextRequest) {
         const transactionTime = format(new Date(), 'yyyyMMddHHmmss');
 
         const signatureString = [
-            `accountNo=${merchantAccountNo}`,
+            `accountNo=${receivingAccount}`,
             `amount=${amount}`,
             `callBackURL=${DIRECT_CALLBACK_URL}`,
             `companyName=${COMPANY_NAME}`,
@@ -98,7 +128,7 @@ export async function POST(req: NextRequest) {
         const signature = createHash('sha256').update(signatureString, 'utf8').digest('hex');
 
         const payload = {
-            accountNo: merchantAccountNo,
+            accountNo: receivingAccount,
             amount: String(amount),
             callBackURL: DIRECT_CALLBACK_URL,
             companyName: COMPANY_NAME,
@@ -150,7 +180,7 @@ export async function POST(req: NextRequest) {
                     Authorization: `Bearer ${superAppToken}`,
                 },
                 body: {
-                    accountNo: merchantAccountNo,
+                    accountNo: receivingAccount,
                     amount: String(amount),
                     callBackURL: DIRECT_CALLBACK_URL,
                     companyName: COMPANY_NAME,

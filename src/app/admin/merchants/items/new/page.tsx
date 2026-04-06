@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { useRequirePermission } from '@/hooks/use-require-permission';
+import { useAuth } from '@/hooks/use-auth';
 
 type InventoryRow = {
   selectedValueIds: string[];
@@ -22,11 +23,13 @@ export default function NewItemPage() {
   useRequirePermission('merchants');
   const router = useRouter();
   const { toast } = useToast();
+  const { currentUser } = useAuth();
+  const isMerchantUser = !!currentUser?.merchantId;
   const [merchants, setMerchants] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [merchantId, setMerchantId] = useState('');
+  const [merchantId, setMerchantId] = useState(currentUser?.merchantId || '');
   const [categoryId, setCategoryId] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -54,6 +57,13 @@ export default function NewItemPage() {
   // Inventory by attribute + location
   const [locations, setLocations] = useState<any[]>([]);
   const [inventoryRows, setInventoryRows] = useState<InventoryRow[]>([]);
+
+  // Auto-set merchantId when the logged-in user is a merchant
+  useEffect(() => {
+    if (currentUser?.merchantId) {
+      setMerchantId(currentUser.merchantId);
+    }
+  }, [currentUser?.merchantId]);
 
   useEffect(() => {
     Promise.all([
@@ -252,6 +262,7 @@ export default function NewItemPage() {
           <p className="text-muted-foreground mb-6">Item details used by borrowers in the shop.</p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {!isMerchantUser && (
             <div>
               <Label>Merchant</Label>
               <Select value={merchantId} onValueChange={setMerchantId}>
@@ -259,6 +270,7 @@ export default function NewItemPage() {
                 <SelectContent>{merchants.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            )}
             <div>
               <Label>Category</Label>
               <Select value={categoryId} onValueChange={setCategoryId}>

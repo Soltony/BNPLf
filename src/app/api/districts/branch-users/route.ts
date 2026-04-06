@@ -119,7 +119,14 @@ export async function POST(req: NextRequest) {
     );
   } catch (error: any) {
     if (error.code === 'P2002') {
-      return NextResponse.json({ error: 'A user with this email or phone number already exists' }, { status: 409 });
+      const target = error.meta?.target;
+      if (Array.isArray(target) && target.includes('email') || String(target).includes('email')) {
+        return NextResponse.json({ error: 'A user with this email already exists.' }, { status: 409 });
+      }
+      if (Array.isArray(target) && target.includes('phoneNumber') || String(target).includes('phoneNumber')) {
+        return NextResponse.json({ error: 'A user with this phone number already exists.' }, { status: 409 });
+      }
+      return NextResponse.json({ error: 'A user with this email or phone number already exists.' }, { status: 409 });
     }
     console.error('Error creating branch user:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
@@ -162,7 +169,14 @@ export async function PUT(req: NextRequest) {
     });
   } catch (error: any) {
     if (error.code === 'P2002') {
-      return NextResponse.json({ error: 'A user with this email or phone number already exists' }, { status: 409 });
+      const target = error.meta?.target;
+      if (Array.isArray(target) && target.includes('email') || String(target).includes('email')) {
+        return NextResponse.json({ error: 'A user with this email already exists.' }, { status: 409 });
+      }
+      if (Array.isArray(target) && target.includes('phoneNumber') || String(target).includes('phoneNumber')) {
+        return NextResponse.json({ error: 'A user with this phone number already exists.' }, { status: 409 });
+      }
+      return NextResponse.json({ error: 'A user with this email or phone number already exists.' }, { status: 409 });
     }
     console.error('Error updating branch user:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
@@ -184,6 +198,100 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error('Error deleting branch user:', error);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+  }
+}
+
+/**
+ * PATCH — Resend SMS or Reset Password for a branch user
+ * Body: { id: string; action: 'resend-sms' | 'reset-password' }
+ */
+export async function PATCH(req: NextRequest) {
+  const currentUser = await getUserFromSession();
+  if (!currentUser || !currentUser.permissions?.['branch']?.update) {
+    return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+  }
+  try {
+    const { id, action } = await req.json();
+    if (!id || !action) {
+      return NextResponse.json({ error: 'id and action are required' }, { status: 400 });
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id },
+      select: { id: true, fullName: true, email: true, phoneNumber: true, branchId: true },
+    });
+    if (!targetUser) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    if (action === 'reset-password') {
+      const newPassword =
+        Math.random().toString(36).slice(2) +
+        Math.random().toString(36).toUpperCase().slice(2) +
+        '!1';
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      await prisma.user.update({
+        where: { id },
+        data: { password: hashedPassword, passwordChangeRequired: true },
+      });
+
+      // Send SMS with new credentials
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL ||
+        process.env.CALLBACK_URL?.replace(/\/api\/.*$/, '') ||
+        'https://nibteraloan.nibbank.com.et';
+      const smsText = `Your NIB BNPL password has been reset.\nLogin: ${appUrl}/admin/login\nEmail: ${targetUser.email}\nNew Password: ${newPassword}\nPlease change your password on first login.`;
+      sendSms(targetUser.phoneNumber, smsText).catch((err: any) => {
+        console.error('[branch-user] Reset password SMS failed:', err);
+      });
+
+      await createAuditLog({
+        actorId: currentUser.id,
+        action: 'RESET_BRANCH_USER_PASSWORD',
+        entity: 'User',
+        entityId: id,
+      });
+
+      return NextResponse.json({ success: true, message: 'Password reset. New credentials sent via SMS.' });
+    }
+
+    if (action === 'resend-sms') {
+      // Generate a new password and resend
+      const newPassword =
+        Math.random().toString(36).slice(2) +
+        Math.random().toString(36).toUpperCase().slice(2) +
+        '!1';
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+      await prisma.user.update({
+        where: { id },
+        data: { password: hashedPassword, passwordChangeRequired: true },
+      });
+
+      const appUrl =
+        process.env.NEXT_PUBLIC_APP_URL ||
+        process.env.CALLBACK_URL?.replace(/\/api\/.*$/, '') ||
+        'https://nibteraloan.nibbank.com.et';
+      const smsText = `Welcome to NIB BNPL. Your account has been created.\nLogin: ${appUrl}/admin/login\nEmail: ${targetUser.email}\nPassword: ${newPassword}\nPlease change your password on first login.`;
+      sendSms(targetUser.phoneNumber, smsText).catch((err: any) => {
+        console.error('[branch-user] Resend SMS failed:', err);
+      });
+
+      await createAuditLog({
+        actorId: currentUser.id,
+        action: 'RESEND_BRANCH_USER_SMS',
+        entity: 'User',
+        entityId: id,
+      });
+
+      return NextResponse.json({ success: true, message: 'SMS resent with new credentials.' });
+    }
+
+    return NextResponse.json({ error: 'Invalid action. Use "resend-sms" or "reset-password".' }, { status: 400 });
+  } catch (error) {
+    console.error('Error in branch user PATCH:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

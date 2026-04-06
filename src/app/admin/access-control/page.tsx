@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRequirePermission } from '@/hooks/use-require-permission';
-import { PlusCircle, MoreHorizontal } from 'lucide-react';
+import { PlusCircle, MoreHorizontal, Send, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AddUserDialog } from '@/components/user/add-user-dialog';
 import { AddRoleDialog } from '@/components/user/add-role-dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -159,6 +159,40 @@ function UsersTab() {
         }
     };
 
+    const handleResendSms = async (targetUser: User) => {
+        try {
+            const response = await fetch('/api/users', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: targetUser.id, action: 'resend-sms' }),
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to resend SMS');
+            }
+            toast({ title: 'SMS Sent', description: `Login credentials resent to ${targetUser.fullName}` });
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        }
+    };
+
+    const handleResetPassword = async (targetUser: User) => {
+        try {
+            const response = await fetch('/api/users', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: targetUser.id, action: 'reset-password' }),
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to reset password');
+            }
+            toast({ title: 'Password Reset', description: `New password sent via SMS to ${targetUser.fullName}` });
+        } catch (error: any) {
+            toast({ title: 'Error', description: error.message, variant: 'destructive' });
+        }
+    };
+
     if (isLoading) {
         return <div className="flex justify-center items-center h-48"><Loader2 className="h-8 w-8 animate-spin" /></div>
     }
@@ -219,6 +253,15 @@ function UsersTab() {
                                                 <DropdownMenuItem onClick={() => handleOpenDialog(user)} disabled={!canUpdate}>Edit</DropdownMenuItem>
                                                 <DropdownMenuItem onClick={() => handleToggleStatus(user)} disabled={!canUpdate}>
                                                     {user.status === 'Active' ? 'Deactivate' : 'Activate'}
+                                                </DropdownMenuItem>
+                                                <DropdownMenuSeparator />
+                                                <DropdownMenuItem onClick={() => handleResendSms(user)} disabled={!canUpdate}>
+                                                    <Send className="mr-2 h-4 w-4" />
+                                                    Resend SMS
+                                                </DropdownMenuItem>
+                                                <DropdownMenuItem onClick={() => handleResetPassword(user)} disabled={!canUpdate}>
+                                                    <RotateCcw className="mr-2 h-4 w-4" />
+                                                    Reset Password
                                                 </DropdownMenuItem>
                                             </DropdownMenuContent>
                                         </DropdownMenu>

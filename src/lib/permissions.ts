@@ -26,6 +26,7 @@ const ENTITY_TO_MODULE: Record<string, string[]> = {
   eligibilitylist: ['settings'],
   dataprovisioningupload: ['settings', 'scoring-engine'],
   termsandconditions: ['settings'],
+  deliveryagreementtemplate: ['settings'],
   loancycleconfig: ['settings'],
   dataprovisioningconfig: ['scoring-engine', 'settings'],
   scoringrules: ['scoring-engine'],

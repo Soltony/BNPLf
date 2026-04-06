@@ -475,6 +475,7 @@ export async function GET(request: NextRequest) {
         let disbursementStatusText: string | null = null;
         let disbursementOutcome: string | null = null;
         let borrowerAccount: string | null = null;
+        let disbursementCreditAccount: string | null = null;
 
         if (loan && loan.borrowerId) {
           const pa = phoneAccountMap.get(loan.borrowerId) || null;
@@ -559,11 +560,11 @@ export async function GET(request: NextRequest) {
             // This ensures the report shows the same reference as the reversals page
             cbsReference = match.transactionId ?? null;
 
-            // Use the creditAccount from DisbursementTransaction as the authoritative borrower account
-            // This is the actual account that received the disbursement, which is critical for
-            // salary advance loans where borrowers may have multiple accounts
+            // Store the DisbursementTransaction credit account separately
+            // so reports can show "Credit Account" (where funds went) and
+            // "Customer Account" (borrower's own bank account) as distinct columns.
             if (match.creditAccount) {
-              borrowerAccount = match.creditAccount;
+              disbursementCreditAccount = match.creditAccount;
             }
 
             // Determine status: prefer disbursementStatus field (SUCCESS/FAILED), fallback to statusCode
@@ -603,6 +604,7 @@ export async function GET(request: NextRequest) {
           productType: loan?.product?.name || null,
           borrowerId: loan?.borrowerId || null,
           borrowerAccount,
+          disbursementCreditAccount,
           principalDisbursed,
           netDisbursed: principalDisbursed,
           principalOutstanding,
