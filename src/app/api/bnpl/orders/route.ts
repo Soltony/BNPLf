@@ -323,15 +323,37 @@ export async function PUT(req: NextRequest) {
             });
 
             if (disRes.ok) {
+              // The external route already updates the record via findOrCreateDisbursementTransaction,
+              // but we also set SUCCESS here as a safety net.
               await prisma.disbursementTransaction.update({
                 where: { id: disbursement.id },
                 data: { disbursementStatus: 'SUCCESS' },
               });
             } else {
-              console.error('External disbursement failed for BNPL order:', id);
+              const errBody = await disRes.text().catch(() => null);
+              console.error('External disbursement failed for BNPL order:', id, 'status:', disRes.status, 'body:', errBody);
+              // Update the record to FAILED so it doesn't stay PENDING forever
+              await prisma.disbursementTransaction.update({
+                where: { id: disbursement.id },
+                data: {
+                  disbursementStatus: 'FAILED',
+                  statusCode: disRes.status,
+                  responsePayload: errBody || undefined,
+                  rawResponse: errBody || undefined,
+                } as any,
+              });
             }
-          } catch (disErr) {
+          } catch (disErr: any) {
             console.error('Error calling external disbursement:', disErr);
+            // Update the record to FAILED so it doesn't stay PENDING forever
+            await prisma.disbursementTransaction.update({
+              where: { id: disbursement.id },
+              data: {
+                disbursementStatus: 'FAILED',
+                responsePayload: JSON.stringify({ error: 'Self-fetch failed', details: String(disErr?.message ?? disErr) }),
+                rawResponse: String(disErr?.message ?? disErr),
+              } as any,
+            }).catch((e: any) => console.error('Failed to mark disbursement as FAILED:', e));
           }
         }
       } catch (loanErr) {

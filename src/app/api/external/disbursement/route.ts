@@ -86,6 +86,28 @@ export async function POST(req: Request) {
 
     const enabled = await areDisbursementsEnabled();
     if (!enabled) {
+      // Parse body to get loanId so we can update any PENDING record
+      try {
+        const body: Body = await req.clone().json();
+        if (body.loanId) {
+          const existing = await prisma.disbursementTransaction.findFirst({
+            where: { loanId: body.loanId, disbursementStatus: "PENDING" } as any,
+          });
+          if (existing) {
+            await prisma.disbursementTransaction.update({
+              where: { id: existing.id },
+              data: {
+                disbursementStatus: "FAILED",
+                responsePayload: JSON.stringify({ error: "Disbursements are currently disabled." }),
+                rawResponse: "Disbursements are currently disabled.",
+                statusCode: 503,
+              } as any,
+            });
+          }
+        }
+      } catch (_) {
+        // best-effort; don't block the 503 response
+      }
       return NextResponse.json(
         { error: "Disbursements are currently disabled." },
         { status: 503 }
