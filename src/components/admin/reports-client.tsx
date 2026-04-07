@@ -98,6 +98,26 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
   >({});
   const [isExporting, setIsExporting] = useState(false);
 
+  // Direct Payment state
+  const [directPaymentData, setDirectPaymentData] = useState<any[]>([]);
+  const [directPaymentPagination, setDirectPaymentPagination] = useState({ total: 0, page: 1, pageSize: 50, totalPages: 0 });
+  const [isDirectPaymentLoading, setIsDirectPaymentLoading] = useState(false);
+
+  // Subscription Report state
+  const [districts, setDistricts] = useState<any[]>([]);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [branchSubData, setBranchSubData] = useState<any[]>([]);
+  const [branchSubPagination, setBranchSubPagination] = useState({ total: 0, page: 1, pageSize: 50, totalPages: 0 });
+  const [isBranchSubLoading, setIsBranchSubLoading] = useState(false);
+  const [branchSubSearch, setBranchSubSearch] = useState("");
+  const [branchSubDistrict, setBranchSubDistrict] = useState("all");
+  const [branchSubStatus, setBranchSubStatus] = useState("all");
+  const [branchSubDate, setBranchSubDate] = useState("");
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [merchantData, setMerchantData] = useState<any[]>([]);
+  const [merchantPagination, setMerchantPagination] = useState({ total: 0, page: 1, pageSize: 50, totalPages: 0 });
+  const [isMerchantLoading, setIsMerchantLoading] = useState(false);
+
   const isSuperAdminOrRecon =
     currentUser?.role === "Super Admin" ||
     currentUser?.role === "Reconciliation";
@@ -332,6 +352,126 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     }
   }, [providerId, timeframe, dateRange, debouncedSearch, buildPaginatedUrl, toast]);
+
+  // --- Direct Payment fetch ---
+  const fetchDirectPaymentData = useCallback(async (page: number = 1, pageSize: number = 50) => {
+    setIsDirectPaymentLoading(true);
+    try {
+      const params = new URLSearchParams({
+        timeframe,
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      if (dateRange?.from) params.set("from", dateRange.from.toISOString());
+      if (dateRange?.to) params.set("to", dateRange.to.toISOString());
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      const response = await fetch(`/api/reports/direct-payments?${params.toString()}`);
+      if (!response.ok) throw new Error("Failed to fetch direct payments");
+      const result = await response.json();
+      setDirectPaymentData(result.data || []);
+      setDirectPaymentPagination({ total: result.total || 0, page: result.page || 1, pageSize: result.pageSize || pageSize, totalPages: result.totalPages || 0 });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsDirectPaymentLoading(false);
+    }
+  }, [timeframe, dateRange, debouncedSearch, toast]);
+
+  // --- Subscription: fetch districts list ---
+  const fetchDistricts = useCallback(async () => {
+    try {
+      const response = await fetch("/api/districts");
+      if (!response.ok) return;
+      const data = await response.json();
+      setDistricts(data || []);
+    } catch {}
+  }, []);
+
+  // --- Subscription: fetch all branches for the branch selector ---
+  const fetchAllBranches = useCallback(async () => {
+    try {
+      const response = await fetch("/api/districts/branches");
+      if (!response.ok) return;
+      const data = await response.json();
+      setBranches(data || []);
+    } catch {}
+  }, []);
+
+  // --- Subscription: fetch branch subscription data ---
+  const fetchBranchSubscriptionData = useCallback(async (page: number = 1, pageSize: number = 50) => {
+    setIsBranchSubLoading(true);
+    try {
+      const params = new URLSearchParams({
+        type: "branches",
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      if (branchSubSearch) params.set("search", branchSubSearch);
+      if (branchSubDistrict && branchSubDistrict !== "all") params.set("districtId", branchSubDistrict);
+      if (branchSubStatus && branchSubStatus !== "all") params.set("status", branchSubStatus);
+      if (branchSubDate) params.set("date", branchSubDate);
+      const response = await fetch(`/api/reports/subscriptions?${params.toString()}`);
+      if (!response.ok) throw new Error("Failed to fetch branch data");
+      const result = await response.json();
+      setBranchSubData(result.data || []);
+      setBranchSubPagination({ total: result.total || 0, page: result.page || 1, pageSize: result.pageSize || pageSize, totalPages: result.totalPages || 0 });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsBranchSubLoading(false);
+    }
+  }, [branchSubSearch, branchSubDistrict, branchSubStatus, branchSubDate, toast]);
+
+  // --- Subscription: fetch merchant details for a branch ---
+  const fetchMerchantDetails = useCallback(async (branchId: string, page: number = 1, pageSize: number = 50) => {
+    if (!branchId) return;
+    setIsMerchantLoading(true);
+    try {
+      const params = new URLSearchParams({
+        type: "merchants",
+        branchId,
+        page: String(page),
+        pageSize: String(pageSize),
+      });
+      const response = await fetch(`/api/reports/subscriptions?${params.toString()}`);
+      if (!response.ok) throw new Error("Failed to fetch merchants");
+      const result = await response.json();
+      setMerchantData(result.data || []);
+      setMerchantPagination({ total: result.total || 0, page: result.page || 1, pageSize: result.pageSize || pageSize, totalPages: result.totalPages || 0 });
+    } catch (error: any) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } finally {
+      setIsMerchantLoading(false);
+    }
+  }, [toast]);
+
+  // Load districts and branches on mount for subscription tab
+  useEffect(() => {
+    fetchDistricts();
+    fetchAllBranches();
+  }, [fetchDistricts, fetchAllBranches]);
+
+  // Fetch branch subscription data when filters change
+  useEffect(() => {
+    fetchBranchSubscriptionData(1, branchSubPagination.pageSize);
+  }, [branchSubSearch, branchSubDistrict, branchSubStatus, branchSubDate]);
+
+  // Fetch direct payment data when the direct payment tab is active
+  useEffect(() => {
+    if (activeTab === "directPaymentReport") {
+      fetchDirectPaymentData(1, directPaymentPagination.pageSize);
+    }
+  }, [activeTab, timeframe, dateRange, debouncedSearch]);
+
+  // Fetch merchants when branch is selected
+  useEffect(() => {
+    if (selectedBranchId) {
+      fetchMerchantDetails(selectedBranchId, 1, merchantPagination.pageSize);
+    } else {
+      setMerchantData([]);
+      setMerchantPagination({ total: 0, page: 1, pageSize: 50, totalPages: 0 });
+    }
+  }, [selectedBranchId]);
 
   const fetchAllReportData = useCallback(
     async (
@@ -1207,11 +1347,64 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
         </TabsList>
               {/* Direct Payment Report Tab */}
               <TabsContent value="directPaymentReport">
-                <div className="p-4">
-                  <h3 className="text-lg font-bold mb-2">Direct Payment Report</h3>
-                  {/* TODO: Implement Direct Payment report table here */}
-                  <div className="text-muted-foreground">Coming soon: Direct Payment report table.</div>
-                </div>
+                <Table>
+                  <TableHeader className="sticky top-0 bg-card z-10">
+                    <TableRow>
+                      <TableHead>Transaction ID</TableHead>
+                      <TableHead>Order ID</TableHead>
+                      <TableHead>Borrower</TableHead>
+                      <TableHead>Phone</TableHead>
+                      <TableHead>Merchant</TableHead>
+                      <TableHead>Merchant Account</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead>Payment Status</TableHead>
+                      <TableHead>Order Status</TableHead>
+                      <TableHead>Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isDirectPaymentLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={10} className="h-24 text-center">
+                          <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                        </TableCell>
+                      </TableRow>
+                    ) : directPaymentData.length > 0 ? (
+                      directPaymentData.map((row: any) => (
+                        <TableRow key={row.id}>
+                          <TableCell className="font-mono text-xs">{row.transactionId?.slice(-12)}</TableCell>
+                          <TableCell className="font-mono text-xs">{row.orderId?.slice(-8)}</TableCell>
+                          <TableCell>{row.borrowerName}</TableCell>
+                          <TableCell>{row.borrowerPhone}</TableCell>
+                          <TableCell>{row.merchantName}</TableCell>
+                          <TableCell className="font-mono">{row.merchantAccount}</TableCell>
+                          <TableCell className="text-right font-mono">{formatCurrency(row.amount)}</TableCell>
+                          <TableCell>
+                            <Badge variant={row.status === "COMPLETED" ? "default" : row.status === "FAILED" ? "destructive" : "secondary"}
+                              className={cn(row.status === "COMPLETED" && "bg-green-600 text-white")}>{row.status}</Badge>
+                          </TableCell>
+                          <TableCell>{row.orderStatus}</TableCell>
+                          <TableCell>{row.createdAt ? format(new Date(row.createdAt), "yyyy-MM-dd HH:mm") : ""}</TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={10} className="h-24 text-center">No direct payment records found.</TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+                <PaginationControls
+                  tab="directPaymentReport"
+                  meta={{
+                    total: directPaymentPagination.total,
+                    totalPages: directPaymentPagination.totalPages,
+                    page: directPaymentPagination.page,
+                    pageSize: directPaymentPagination.pageSize,
+                  }}
+                  onPageChange={(page) => fetchDirectPaymentData(page, directPaymentPagination.pageSize)}
+                  onPageSizeChange={(pageSize) => fetchDirectPaymentData(1, pageSize)}
+                />
               </TabsContent>
 
               {/* Subscription Report Tabs */}
@@ -1226,21 +1419,40 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
                     {/* Branch Subscription Report Tab */}
                     <TabsContent value="branchSubscription">
                       <div className="overflow-auto rounded-md border h-[50vh]">
-                        {/* Filters: District, Status, Date */}
+                        {/* Filters: Search, District, Status, Date */}
                         <div className="flex flex-wrap gap-2 p-2">
-                          <Input placeholder="Search Branch Name or Code" className="max-w-xs" />
-                          <Select /* TODO: bind value and onChange */>
+                          <div className="relative max-w-xs">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                              placeholder="Search Branch Name or Code"
+                              className="pl-9 max-w-xs"
+                              value={branchSubSearch}
+                              onChange={(e) => setBranchSubSearch(e.target.value)}
+                            />
+                          </div>
+                          <Select value={branchSubDistrict} onValueChange={setBranchSubDistrict}>
                             <SelectTrigger className="w-[160px]"><SelectValue placeholder="District" /></SelectTrigger>
-                            <SelectContent>{/* TODO: Map districts */}</SelectContent>
+                            <SelectContent>
+                              <SelectItem value="all">All Districts</SelectItem>
+                              {districts.map((d: any) => (
+                                <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                              ))}
+                            </SelectContent>
                           </Select>
-                          <Select /* TODO: bind value and onChange */>
+                          <Select value={branchSubStatus} onValueChange={setBranchSubStatus}>
                             <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
                             <SelectContent>
+                              <SelectItem value="all">All</SelectItem>
                               <SelectItem value="active">Active</SelectItem>
                               <SelectItem value="inactive">Inactive</SelectItem>
                             </SelectContent>
                           </Select>
-                          <Input type="date" className="w-[140px]" />
+                          <Input type="date" className="w-[160px]" value={branchSubDate} onChange={(e) => setBranchSubDate(e.target.value)} />
+                          {(branchSubSearch || branchSubDistrict !== "all" || branchSubStatus !== "all" || branchSubDate) && (
+                            <Button variant="ghost" size="sm" onClick={() => { setBranchSubSearch(""); setBranchSubDistrict("all"); setBranchSubStatus("all"); setBranchSubDate(""); }}>
+                              Clear Filters
+                            </Button>
+                          )}
                         </div>
                         <Table>
                           <TableHeader className="sticky top-0 bg-card z-10">
@@ -1249,29 +1461,68 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
                               <TableHead>Branch Code</TableHead>
                               <TableHead>District</TableHead>
                               <TableHead>Subscription Date</TableHead>
-                              <TableHead>Number of Merchants</TableHead>
+                              <TableHead className="text-right">Number of Merchants</TableHead>
                               <TableHead>Status</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {/* TODO: Map branch subscription data here */}
-                            <TableRow>
-                              <TableCell colSpan={6} className="text-center text-muted-foreground">No data yet.</TableCell>
-                            </TableRow>
+                            {isBranchSubLoading ? (
+                              <TableRow>
+                                <TableCell colSpan={6} className="h-24 text-center">
+                                  <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                                </TableCell>
+                              </TableRow>
+                            ) : branchSubData.length > 0 ? (
+                              branchSubData.map((row: any) => (
+                                <TableRow key={row.branchId}>
+                                  <TableCell>{row.branchName}</TableCell>
+                                  <TableCell className="font-mono text-xs">{row.branchCode?.slice(-8)}</TableCell>
+                                  <TableCell>{row.districtName}</TableCell>
+                                  <TableCell>{row.subscriptionDate ? format(new Date(row.subscriptionDate), "yyyy-MM-dd") : ""}</TableCell>
+                                  <TableCell className="text-right">{row.merchantCount}</TableCell>
+                                  <TableCell>
+                                    <Badge variant={row.status === "ACTIVE" ? "default" : "secondary"}
+                                      className={cn(row.status === "ACTIVE" && "bg-green-600 text-white")}>{row.status}</Badge>
+                                  </TableCell>
+                                </TableRow>
+                              ))
+                            ) : (
+                              <TableRow>
+                                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">No branches found.</TableCell>
+                              </TableRow>
+                            )}
                           </TableBody>
                         </Table>
-                        {/* TODO: Add PaginationControls for branch subscription */}
+                        <PaginationControls
+                          tab="branchSubscription"
+                          meta={{
+                            total: branchSubPagination.total,
+                            totalPages: branchSubPagination.totalPages,
+                            page: branchSubPagination.page,
+                            pageSize: branchSubPagination.pageSize,
+                          }}
+                          onPageChange={(page) => fetchBranchSubscriptionData(page, branchSubPagination.pageSize)}
+                          onPageSizeChange={(pageSize) => fetchBranchSubscriptionData(1, pageSize)}
+                        />
                       </div>
                     </TabsContent>
                     {/* Merchant Details per Branch Tab */}
                     <TabsContent value="merchantDetails">
                       <div className="overflow-auto rounded-md border h-[50vh]">
-                        {/* TODO: Add branch selector or drill-down logic */}
                         <div className="flex flex-wrap gap-2 p-2">
-                          <Select /* TODO: bind value and onChange for branch selection */>
-                            <SelectTrigger className="w-[200px]"><SelectValue placeholder="Select Branch" /></SelectTrigger>
-                            <SelectContent>{/* TODO: Map branches */}</SelectContent>
+                          <Select value={selectedBranchId} onValueChange={setSelectedBranchId}>
+                            <SelectTrigger className="w-[280px]"><SelectValue placeholder="Select Branch" /></SelectTrigger>
+                            <SelectContent>
+                              {branches.map((b: any) => (
+                                <SelectItem key={b.id} value={b.id}>{b.name} ({b.district?.name})</SelectItem>
+                              ))}
+                            </SelectContent>
                           </Select>
+                          {selectedBranchId && merchantPagination.total > 0 && (
+                            <span className="text-sm text-muted-foreground self-center">
+                              Total merchants: {merchantPagination.total}
+                            </span>
+                          )}
                         </div>
                         <Table>
                           <TableHeader className="sticky top-0 bg-card z-10">
@@ -1283,13 +1534,46 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {/* TODO: Map merchant details data here */}
-                            <TableRow>
-                              <TableCell colSpan={4} className="text-center text-muted-foreground">Select a branch to view merchants.</TableCell>
-                            </TableRow>
+                            {!selectedBranchId ? (
+                              <TableRow>
+                                <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">Select a branch to view merchants.</TableCell>
+                              </TableRow>
+                            ) : isMerchantLoading ? (
+                              <TableRow>
+                                <TableCell colSpan={4} className="h-24 text-center">
+                                  <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+                                </TableCell>
+                              </TableRow>
+                            ) : merchantData.length > 0 ? (
+                              merchantData.map((row: any) => (
+                                <TableRow key={row.merchantId}>
+                                  <TableCell>{row.merchantName}</TableCell>
+                                  <TableCell className="font-mono text-xs">{row.merchantId?.slice(-8)}</TableCell>
+                                  <TableCell>{row.registrationDate ? format(new Date(row.registrationDate), "yyyy-MM-dd") : ""}</TableCell>
+                                  <TableCell>
+                                    <Badge variant={row.status === "ACTIVE" ? "default" : row.status === "PENDING_APPROVAL" ? "secondary" : "destructive"}
+                                      className={cn(row.status === "ACTIVE" && "bg-green-600 text-white")}>{row.status}</Badge>
+                                  </TableCell>
+                                </TableRow>
+                              ))
+                            ) : (
+                              <TableRow>
+                                <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">No merchants found for this branch.</TableCell>
+                              </TableRow>
+                            )}
                           </TableBody>
                         </Table>
-                        {/* TODO: Add PaginationControls for merchant details */}
+                        <PaginationControls
+                          tab="merchantDetails"
+                          meta={{
+                            total: merchantPagination.total,
+                            totalPages: merchantPagination.totalPages,
+                            page: merchantPagination.page,
+                            pageSize: merchantPagination.pageSize,
+                          }}
+                          onPageChange={(page) => fetchMerchantDetails(selectedBranchId, page, merchantPagination.pageSize)}
+                          onPageSizeChange={(pageSize) => fetchMerchantDetails(selectedBranchId, 1, pageSize)}
+                        />
                       </div>
                     </TabsContent>
                   </Tabs>
