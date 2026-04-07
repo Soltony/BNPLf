@@ -1199,11 +1199,102 @@ export function ReportsClient({ providers }: { providers: LoanProvider[] }) {
           <TabsTrigger value="disbursementsReport">Disbursements</TabsTrigger>
           <TabsTrigger value="repaymentsReport">Repayments</TabsTrigger>
           <TabsTrigger value="collectionsReport">Collections</TabsTrigger>
-
+          <TabsTrigger value="directPaymentReport">Direct Payment</TabsTrigger>
+          <TabsTrigger value="subscriptionReport">Subscription Report</TabsTrigger>
           <TabsTrigger value="utilizationReport">Fund Utilization</TabsTrigger>
           <TabsTrigger value="agingReport">Aging</TabsTrigger>
           <TabsTrigger value="borrowerReport">Borrower Performance</TabsTrigger>
         </TabsList>
+              {/* Direct Payment Report Tab */}
+              <TabsContent value="directPaymentReport">
+                <div className="p-4">
+                  <h3 className="text-lg font-bold mb-2">Direct Payment Report</h3>
+                  {/* TODO: Implement Direct Payment report table here */}
+                  <div className="text-muted-foreground">Coming soon: Direct Payment report table.</div>
+                </div>
+              </TabsContent>
+
+              {/* Subscription Report Tabs */}
+              <TabsContent value="subscriptionReport">
+                <div className="p-4">
+                  <h3 className="text-lg font-bold mb-2">Subscription Report</h3>
+                  <Tabs defaultValue="branchSubscription" className="space-y-4">
+                    <TabsList>
+                      <TabsTrigger value="branchSubscription">Branch Subscription Report</TabsTrigger>
+                      <TabsTrigger value="merchantDetails">Merchant Details per Branch</TabsTrigger>
+                    </TabsList>
+                    {/* Branch Subscription Report Tab */}
+                    <TabsContent value="branchSubscription">
+                      <div className="overflow-auto rounded-md border h-[50vh]">
+                        {/* Filters: District, Status, Date */}
+                        <div className="flex flex-wrap gap-2 p-2">
+                          <Input placeholder="Search Branch Name or Code" className="max-w-xs" />
+                          <Select /* TODO: bind value and onChange */>
+                            <SelectTrigger className="w-[160px]"><SelectValue placeholder="District" /></SelectTrigger>
+                            <SelectContent>{/* TODO: Map districts */}</SelectContent>
+                          </Select>
+                          <Select /* TODO: bind value and onChange */>
+                            <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="active">Active</SelectItem>
+                              <SelectItem value="inactive">Inactive</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <Input type="date" className="w-[140px]" />
+                        </div>
+                        <Table>
+                          <TableHeader className="sticky top-0 bg-card z-10">
+                            <TableRow>
+                              <TableHead>Branch Name</TableHead>
+                              <TableHead>Branch Code</TableHead>
+                              <TableHead>District</TableHead>
+                              <TableHead>Subscription Date</TableHead>
+                              <TableHead>Number of Merchants</TableHead>
+                              <TableHead>Status</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {/* TODO: Map branch subscription data here */}
+                            <TableRow>
+                              <TableCell colSpan={6} className="text-center text-muted-foreground">No data yet.</TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                        {/* TODO: Add PaginationControls for branch subscription */}
+                      </div>
+                    </TabsContent>
+                    {/* Merchant Details per Branch Tab */}
+                    <TabsContent value="merchantDetails">
+                      <div className="overflow-auto rounded-md border h-[50vh]">
+                        {/* TODO: Add branch selector or drill-down logic */}
+                        <div className="flex flex-wrap gap-2 p-2">
+                          <Select /* TODO: bind value and onChange for branch selection */>
+                            <SelectTrigger className="w-[200px]"><SelectValue placeholder="Select Branch" /></SelectTrigger>
+                            <SelectContent>{/* TODO: Map branches */}</SelectContent>
+                          </Select>
+                        </div>
+                        <Table>
+                          <TableHeader className="sticky top-0 bg-card z-10">
+                            <TableRow>
+                              <TableHead>Merchant Name</TableHead>
+                              <TableHead>Merchant ID</TableHead>
+                              <TableHead>Registration Date</TableHead>
+                              <TableHead>Status</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {/* TODO: Map merchant details data here */}
+                            <TableRow>
+                              <TableCell colSpan={4} className="text-center text-muted-foreground">Select a branch to view merchants.</TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                        {/* TODO: Add PaginationControls for merchant details */}
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </div>
+              </TabsContent>
         <div className="overflow-auto rounded-md border h-[60vh]">
           <TabsContent value="providerReport" className="space-y-4 m-0">
             <Table>

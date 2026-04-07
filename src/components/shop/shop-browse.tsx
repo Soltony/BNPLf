@@ -163,7 +163,7 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100/80">
       {/* Header */}
-      <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-4 pt-3 pb-5 sm:pt-4 sm:pb-6 shadow-md">
+      <div className="bg-shop px-4 pt-3 pb-5 sm:pt-4 sm:pb-6 shadow-md">
         <div className="max-w-7xl mx-auto">
           {/* Top row with title and orders */}
           <div className="flex items-center justify-between mb-3 sm:mb-4">
@@ -226,7 +226,7 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
               onClick={() => setCategoryId('')}
               className={`shrink-0 snap-start px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-all ${
                 !categoryId
-                  ? 'bg-white text-amber-700 shadow-md'
+                  ? 'bg-white text-shop-deep shadow-md'
                   : 'bg-white/20 text-white hover:bg-white/30'
               }`}
             >
@@ -238,7 +238,7 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
                 onClick={() => setCategoryId(c.id === categoryId ? '' : c.id)}
                 className={`shrink-0 snap-start px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-medium transition-all ${
                   categoryId === c.id
-                    ? 'bg-white text-amber-700 shadow-md'
+                    ? 'bg-white text-shop-deep shadow-md'
                     : 'bg-white/20 text-white hover:bg-white/30'
                 }`}
               >
@@ -301,7 +301,7 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
                   <button
                     type="button"
                     onClick={() => setMerchantSearchOpen(true)}
-                    className="text-amber-600 hover:text-amber-700 transition-colors p-1.5 rounded-lg hover:bg-amber-50"
+                    className="text-shop-text hover:text-shop-deep transition-colors p-1.5 rounded-lg hover:bg-shop-soft"
                     aria-label="Open merchant search"
                   >
                     <Search className="h-4 w-4" />
@@ -313,7 +313,7 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
                     onClick={() => {
                       setShowAllMerchants((prev) => !prev);
                     }}
-                    className="text-xs sm:text-sm text-amber-600 hover:text-amber-700 font-medium flex items-center gap-0.5 transition-colors"
+                    className="text-xs sm:text-sm text-shop-text hover:text-shop-deep font-medium flex items-center gap-0.5 transition-colors"
                   >
                     {showAllMerchants ? 'Show Less' : 'See All'}
                     <ChevronRight className="h-3.5 w-3.5" />
@@ -330,9 +330,9 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
                 <button
                   key={m.id}
                   onClick={() => handleMerchantSelect(m.id)}
-                  className={`flex flex-col items-center gap-1.5 ${shouldExpandMerchants ? 'w-full' : 'shrink-0 snap-start'} group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 rounded-xl p-2 transition-all ${
+                  className={`flex flex-col items-center gap-1.5 ${shouldExpandMerchants ? 'w-full' : 'shrink-0 snap-start'} group focus:outline-none focus-visible:ring-2 focus-visible:ring-shop rounded-xl p-2 transition-all ${
                     merchantId === m.id
-                      ? 'bg-amber-50 ring-2 ring-amber-400'
+                      ? 'bg-shop-soft ring-2 ring-shop'
                       : 'hover:bg-gray-100'
                   }`}
                   aria-pressed={merchantId === m.id}
@@ -341,7 +341,7 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
                   <div
                     className={`h-14 w-14 sm:h-16 sm:w-16 rounded-full flex items-center justify-center border-2 transition-all shadow-sm group-hover:shadow-md ${
                       merchantId === m.id
-                        ? 'border-amber-400 bg-white shadow-md'
+                        ? 'border-shop bg-white shadow-md'
                         : 'border-gray-200 bg-white'
                     }`}
                   >
@@ -355,14 +355,14 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
                     ) : (
                       <Store
                         className={`h-5 w-5 sm:h-6 sm:w-6 ${
-                          merchantId === m.id ? 'text-amber-500' : 'text-gray-400'
+                          merchantId === m.id ? 'text-shop' : 'text-gray-400'
                         }`}
                       />
                     )}
                   </div>
                   <span
                     className={`text-[10px] sm:text-xs font-medium text-center max-w-[60px] sm:max-w-[72px] truncate ${
-                      merchantId === m.id ? 'text-amber-700' : 'text-muted-foreground'
+                      merchantId === m.id ? 'text-shop-deep' : 'text-muted-foreground'
                     }`}
                   >
                     {m.name}
@@ -376,12 +376,12 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
                   onClick={() => {
                     setShowAllMerchants((prev) => !prev);
                   }}
-                  className={`flex flex-col items-center gap-1.5 ${shouldExpandMerchants ? 'w-full' : 'shrink-0 snap-start'} group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 rounded-xl p-2 hover:bg-gray-100 transition-all`}
+                  className={`flex flex-col items-center gap-1.5 ${shouldExpandMerchants ? 'w-full' : 'shrink-0 snap-start'} group focus:outline-none focus-visible:ring-2 focus-visible:ring-shop rounded-xl p-2 hover:bg-gray-100 transition-all`}
                 >
-                  <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full flex items-center justify-center border-2 border-dashed border-gray-300 bg-white group-hover:border-amber-400 group-hover:shadow-md transition-all">
-                    <ChevronRight className="h-5 w-5 sm:h-6 sm:w-6 text-gray-400 group-hover:text-amber-500 transition-colors" />
+                  <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-full flex items-center justify-center border-2 border-dashed border-gray-300 bg-white group-hover:border-shop group-hover:shadow-md transition-all">
+                    <ChevronRight className="h-5 w-5 sm:h-6 sm:w-6 text-gray-400 group-hover:text-shop transition-colors" />
                   </div>
-                  <span className="text-[10px] sm:text-xs font-medium text-muted-foreground group-hover:text-amber-600 transition-colors">
+                  <span className="text-[10px] sm:text-xs font-medium text-muted-foreground group-hover:text-shop-text transition-colors">
                     {showAllMerchants ? 'Show Less' : 'See All'}
                   </span>
                 </button>
@@ -394,7 +394,7 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
                     key={i}
                     className={`h-1 rounded-full transition-all duration-300 ${
                       merchantScrollIndex === i
-                        ? 'w-6 bg-amber-500'
+                        ? 'w-6 bg-shop'
                         : 'w-2 bg-gray-300'
                     }`}
                   />
@@ -418,7 +418,7 @@ export function ShopBrowse({ hasActiveLoan = false }: { hasActiveLoan?: boolean 
           {hasActiveLoan ? (
             <Link
               href={`/loan?borrowerId=${borrowerId}`}
-              className="mx-auto flex w-full max-w-lg items-center justify-between rounded-xl bg-amber-500 px-4 py-3 text-white shadow-sm transition-colors hover:bg-amber-600"
+              className="mx-auto flex w-full max-w-lg items-center justify-between rounded-xl bg-shop px-4 py-3 text-white shadow-sm transition-colors hover:bg-shop-dark"
             >
               <div className="flex items-center gap-2">
                 <CreditCard className="h-4 w-4" />
@@ -530,7 +530,7 @@ function ShopProductCard({ item, fmtCurr, isNew, onSelect }: { item: any; fmtCur
             href={item.videoUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 flex items-center gap-1 text-[10px] sm:text-xs font-medium text-amber-700 bg-white/90 backdrop-blur-sm rounded-full pl-1.5 pr-2 py-0.5 sm:pl-2 sm:pr-2.5 sm:py-1 shadow-sm hover:bg-white transition-colors"
+            className="absolute top-1.5 right-1.5 sm:top-2 sm:right-2 flex items-center gap-1 text-[10px] sm:text-xs font-medium text-shop-deep bg-white/90 backdrop-blur-sm rounded-full pl-1.5 pr-2 py-0.5 sm:pl-2 sm:pr-2.5 sm:py-1 shadow-sm hover:bg-white transition-colors"
           >
             <PlayCircle className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
             <span className="hidden sm:inline">Video</span>
@@ -543,7 +543,7 @@ function ShopProductCard({ item, fmtCurr, isNew, onSelect }: { item: any; fmtCur
         {/* Merchant badge */}
         <Badge
           variant="secondary"
-          className="bg-amber-50 text-amber-700 border-0 text-[9px] sm:text-[10px] font-semibold px-1.5 sm:px-2 py-0 rounded-md uppercase tracking-wider"
+          className="bg-shop-soft text-shop-deep border-0 text-[9px] sm:text-[10px] font-semibold px-1.5 sm:px-2 py-0 rounded-md uppercase tracking-wider"
         >
           {item.merchant?.name}
         </Badge>
@@ -583,7 +583,7 @@ function ShopProductCard({ item, fmtCurr, isNew, onSelect }: { item: any; fmtCur
             </div>
             <Button
               size="sm"
-              className="bg-amber-500 hover:bg-amber-600 text-white rounded-lg px-3 sm:px-4 h-7 sm:h-8 text-[10px] sm:text-xs font-semibold shadow-sm hover:shadow transition-all"
+              className="bg-shop hover:bg-shop-dark text-white rounded-lg px-3 sm:px-4 h-7 sm:h-8 text-[10px] sm:text-xs font-semibold shadow-sm hover:shadow transition-all"
               onClick={() => onSelect(item.id)}
             >
               Select

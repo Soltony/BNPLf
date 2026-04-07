@@ -17,6 +17,15 @@ export default {
       colors: {
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
+        shop: {
+          DEFAULT: '#fdb913',
+          dark: '#e3a400',
+          soft: '#fff3cf',
+          pale: '#ffe7a1',
+          deep: '#b88400',
+          deeper: '#9f7400',
+          text: '#d39a00',
+        },
         card: {
           DEFAULT: 'hsl(var(--card))',
           foreground: 'hsl(var(--card-foreground))',

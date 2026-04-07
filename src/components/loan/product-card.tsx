@@ -136,21 +136,14 @@ export function ProductCard({
                     asOfDate: asOfDate,
                 });
                 
-                // Use accurate paid amounts from the detailed calculation
-                // Service fee is equally split across all installments
+                // Each installment pays an equal share of service fee, interest, and tax.
+                // We use a simple per-installment split rather than cumulative tracking
+                // because serviceFeePaid/interestPaid from the calculator are unreliable
+                // when daily fees are disabled (they stay 0).
                 const totalInstallments = installments.length || 1;
-                const serviceFeePerInstallment = totals.serviceFee / totalInstallments;
-                const serviceFeeDue = Math.max(0, serviceFeePerInstallment - (totals.serviceFeePaid / totalInstallments));
-                
-                // Interest remaining after what's been paid (accurate from simulation)
-                const interestDue = Math.max(0, totals.interest - totals.interestPaid);
-                
-                // Tax remaining (proportional to what's still due)
-                const totalTaxableOriginal = totals.interest + totals.serviceFee;
-                const totalTaxableDue = interestDue + serviceFeeDue;
-                const taxDue = totalTaxableOriginal > 0 
-                    ? Math.max(0, (totals.tax / totalTaxableOriginal) * totalTaxableDue)
-                    : 0;
+                const serviceFeeDue = Math.max(0, totals.serviceFee / totalInstallments);
+                const interestDue = Math.max(0, totals.interest / totalInstallments);
+                const taxDue = Math.max(0, totals.tax / totalInstallments);
                 
                 // Penalty remaining
                 const penaltyDue = Math.max(0, installmentPenalty);

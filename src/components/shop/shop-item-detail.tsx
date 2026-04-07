@@ -194,7 +194,7 @@ export function ShopItemDetail() {
     return (
       <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100/80 flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-[3px] border-amber-200 border-t-amber-500" />
+          <div className="animate-spin rounded-full h-10 w-10 border-[3px] border-shop-pale border-t-shop" />
           <p className="text-sm text-gray-400">Loading product...</p>
         </div>
       </div>
@@ -204,7 +204,7 @@ export function ShopItemDetail() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100/80">
       {/* Header */}
-      <div className="bg-gradient-to-r from-amber-500 to-amber-600 px-4 py-3 sm:py-4 shadow-md">
+      <div className="bg-shop px-4 py-3 sm:py-4 shadow-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button
@@ -280,7 +280,7 @@ export function ShopItemDetail() {
                       <span
                         key={i}
                         className={`h-2 rounded-full transition-all duration-200 ${
-                          i === selectedImageIdx ? 'w-5 bg-amber-500' : 'w-2 bg-gray-300'
+                          i === selectedImageIdx ? 'w-5 bg-shop' : 'w-2 bg-gray-300'
                         }`}
                       />
                     ))}
@@ -305,7 +305,7 @@ export function ShopItemDetail() {
                 href={item.videoUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="absolute top-3 right-3 flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-white/90 backdrop-blur-sm rounded-full pl-2.5 pr-3 py-1.5 shadow-sm hover:bg-white transition-colors"
+                className="absolute top-3 right-3 flex items-center gap-1.5 text-xs font-medium text-shop-deep bg-white/90 backdrop-blur-sm rounded-full pl-2.5 pr-3 py-1.5 shadow-sm hover:bg-white transition-colors"
               >
                 <PlayCircle className="h-4 w-4" />
                 Watch video
@@ -318,7 +318,7 @@ export function ShopItemDetail() {
             <div className="flex items-center gap-2 flex-wrap">
               <Badge
                 variant="secondary"
-                className="bg-amber-50 text-amber-700 border-0 text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-md uppercase tracking-wider"
+                className="bg-shop-soft text-shop-deep border-0 text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-md uppercase tracking-wider"
               >
                 {item.merchant?.name}
               </Badge>
@@ -384,7 +384,7 @@ export function ShopItemDetail() {
                         setSelectedOptions({ ...selectedOptions, [group.id]: v })
                       }
                     >
-                      <SelectTrigger className={`mt-1.5 rounded-xl bg-gray-50/80 focus:bg-white focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 transition-all h-11 ${
+                      <SelectTrigger className={`mt-1.5 rounded-xl bg-gray-50/80 focus:bg-white focus:ring-2 focus:ring-shop/20 focus:border-shop transition-all h-11 ${
                         !selectedOptions[group.id] ? 'border-red-300 ring-1 ring-red-200' : 'border-gray-200'
                       }`}>
                         <SelectValue placeholder={`Select ${group.name}`} />
@@ -423,8 +423,8 @@ export function ShopItemDetail() {
                   </span>
                 </div>
                 {/* Price area */}
-                <div className="bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm font-medium text-amber-800">Total</span>
+                <div className="bg-gradient-to-r from-shop-soft to-shop-pale px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm font-medium text-shop-deeper">Total</span>
                   <div className="text-right">
                     <span className="text-xs text-gray-400 line-through mr-2">
                       {fmtCurr(originalPrice)} ETB
@@ -437,8 +437,8 @@ export function ShopItemDetail() {
                 </div>
               </div>
             ) : (
-              <div className="bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl px-4 py-3 flex items-center justify-between">
-                <span className="text-sm font-medium text-amber-800">Total</span>
+              <div className="bg-gradient-to-r from-shop-soft to-shop-pale rounded-xl px-4 py-3 flex items-center justify-between">
+                <span className="text-sm font-medium text-shop-deeper">Total</span>
                 <div className="text-right">
                   <span className="text-xl sm:text-2xl font-bold text-gray-900">
                     {fmtCurr(totalPrice)}
@@ -465,7 +465,7 @@ export function ShopItemDetail() {
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide text-center">Choose payment method</p>
                     <div className="flex items-center gap-2">
                       <Button
-                        className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="flex-1 bg-shop hover:bg-shop-dark text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={handleChooseLoanProduct}
                         disabled={optionsIncomplete}
                       >
@@ -506,7 +506,7 @@ export function ShopItemDetail() {
               return (
                 <div className="flex items-center gap-2 pt-1">
                   <Button
-                    className="flex-1 bg-amber-500 hover:bg-amber-600 text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 bg-shop hover:bg-shop-dark text-white rounded-xl h-11 font-semibold text-sm shadow-sm hover:shadow transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     onClick={handleChooseLoanProduct}
                     disabled={optionsIncomplete}
                   >

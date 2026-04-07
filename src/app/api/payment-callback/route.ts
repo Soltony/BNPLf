@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
 
     // Extract token if format is like: Bearer {"token":"YOUR_TOKEN"}
     let fixedAuthHeader: string | null = null;
+    console.log("[PAYMENT_CALLBACK] Raw Authorization header", { authHeader });
 
     if (authHeader) {
       // Match both quoted or unquoted token values
@@ -111,6 +112,7 @@ export async function POST(request: NextRequest) {
 
       // If found, reconstruct standard Bearer token format
       fixedAuthHeader = rawToken ? `Bearer ${rawToken}` : authHeader;
+      console.log("[PAYMENT_CALLBACK] Fixed Authorization header", { fixedAuthHeader });
     }
 
     if (!fixedAuthHeader) {
@@ -298,22 +300,17 @@ export async function POST(request: NextRequest) {
         );
         const alreadyRepaid = loan.repaidAmount || 0;
 
-        // Use actual tracked values from the simulation
-        const serviceFeeDue = Math.max(
-          0,
-          totals.serviceFee - totals.serviceFeePaid
-        );
-        const interestDue = Math.max(0, totals.interest - totals.interestPaid);
-        // Tax allocation: tax is paid after interest in priority
-        const taxPaidSoFar = Math.max(
-          0,
-          alreadyRepaid -
-            totals.penalty -
-            totals.serviceFeePaid -
-            totals.interestPaid -
-            totals.principalPaidFromInterestCalc
-        );
-        const taxDue = Math.max(0, totals.tax - taxPaidSoFar);
+        // Each installment pays an equal share of service fee, interest, and tax.
+        // We use a simple per-installment split rather than cumulative tracking
+        // because serviceFeePaid/interestPaid from the calculator are unreliable
+        // when daily fees are disabled (they stay 0).
+        const totalInstallments = refreshedInstallments.length || 1;
+
+        const serviceFeeDue = Math.max(0, totals.serviceFee / totalInstallments);
+        const interestDue = Math.max(0, totals.interest / totalInstallments);
+
+        // Tax proportional to per-installment taxable amounts
+        const taxDue = Math.max(0, totals.tax / totalInstallments);
 
         const penaltyPaidSoFar = Math.min(
           activeInstallment.paidAmount || 0,
