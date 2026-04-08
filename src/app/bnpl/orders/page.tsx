@@ -184,9 +184,9 @@ function BnplOrdersPageInner() {
       // Get the provider ID from the order's loan application product
       const providerId = order.loanApplication?.product?.providerId;
       if (providerId) {
-        const res = await fetch(`/api/settings/delivery-agreement?providerId=${encodeURIComponent(providerId)}`);
+        const res = await fetch(`/api/bnpl/delivery-agreement?providerId=${encodeURIComponent(providerId)}`);
         const data = await res.json();
-        setAgreementContent(data?.template?.content || '');
+        setAgreementContent(data?.content || '');
       } else {
         setAgreementContent('');
       }

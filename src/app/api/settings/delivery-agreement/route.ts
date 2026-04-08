@@ -42,7 +42,11 @@ export async function GET(req: NextRequest) {
             } catch { /* ignore */ }
         }
 
-        return NextResponse.json({ template, pending: pendingForProvider });
+        return NextResponse.json({
+            template,
+            content: template?.content ?? '',
+            pending: pendingForProvider,
+        });
     } catch (error) {
         console.error('Error fetching delivery agreement:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
