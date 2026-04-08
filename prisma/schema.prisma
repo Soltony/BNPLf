@@ -214,6 +214,8 @@ model Loan {
   // Penalty accrual tracking (for daily ledger accrual)
   penaltyAccruedAmount       Float                     @default(0)
   penaltyAccruedThroughDate  DateTime?
+  taxDeducted                Float                     @default(0) // Inclusive tax amount deducted upfront
+  netDisbursedAmount         Float?                    // Actual amount disbursed after inclusive tax deduction
   payments                   Payment[]
   installments               LoanInstallment[]
   journalEntries             JournalEntry[]
@@ -481,11 +483,12 @@ model BorrowerAgreement {
 // --------------------------------------
 
 model Tax {
-  id        String  @id @default(cuid())
-  name      String?
-  rate      Float   @default(0)
-  appliedTo String // JSON string: e.g., ["serviceFee", "interest", "penalty"]
-  status    String  @default("ACTIVE") // ACTIVE, PENDING_APPROVAL
+  id          String  @id @default(cuid())
+  name        String?
+  rate        Float   @default(0)
+  appliedTo   String // JSON string: e.g., ["serviceFee", "interest", "penalty"]
+  isInclusive Boolean @default(false) // When true, tax is deducted upfront from principal before disbursement
+  status      String  @default("ACTIVE") // ACTIVE, PENDING_APPROVAL
 }
 
 // --------------------------------------
@@ -548,6 +551,7 @@ model PaymentTransaction {
   id            String   @id @default(cuid())
   transactionId String   @unique
   txnRef        String?
+  paymentType   String   @default("BNPL") // BNPL or DIRECT
   status        String // e.g., RECEIVED, PROCESSED, FAILED_VALIDATION
   payload       String   @db.NVarChar(Max)
   receivedAt    DateTime @default(now())

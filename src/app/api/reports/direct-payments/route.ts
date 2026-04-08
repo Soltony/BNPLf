@@ -90,7 +90,6 @@ export async function GET(req: NextRequest) {
                     borrower: {
                         select: {
                             id: true,
-                            phoneNumber: true,
                             provisionedData: {
                                 select: { data: true },
                                 take: 1,
@@ -114,13 +113,18 @@ export async function GET(req: NextRequest) {
 
         const data = records.map((r: any) => {
             let borrowerName = 'N/A';
+            let borrowerPhone = '';
             if (r.borrower?.provisionedData?.[0]?.data) {
                 try {
                     const parsed = JSON.parse(r.borrower.provisionedData[0].data);
                     const nameKey = Object.keys(parsed).find(
                         (k) => k.toLowerCase() === 'fullname' || k.toLowerCase() === 'full name' || k.toLowerCase() === 'customername'
                     );
+                    const phoneKey = Object.keys(parsed).find(
+                        (k) => k.toLowerCase() === 'phonenumber' || k.toLowerCase() === 'phone number' || k.toLowerCase() === 'mobilenumber'
+                    );
                     if (nameKey) borrowerName = parsed[nameKey];
+                    if (phoneKey) borrowerPhone = parsed[phoneKey];
                 } catch {}
             }
 
@@ -129,7 +133,7 @@ export async function GET(req: NextRequest) {
                 transactionId: r.transactionId,
                 orderId: r.orderId,
                 borrowerId: r.borrowerId,
-                borrowerPhone: r.borrower?.phoneNumber || '',
+                borrowerPhone,
                 borrowerName,
                 merchantId: r.merchantId,
                 merchantName: r.merchant?.name || '',

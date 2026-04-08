@@ -465,6 +465,8 @@ export interface Tax {
     name: string | null;
     rate: number;
     appliedTo: string; // JSON array
+    isInclusive: boolean;
+    status?: string;
 }
 
 // --------------------------------------

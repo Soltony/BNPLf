@@ -234,7 +234,7 @@ export function ApplyClient({
               body: JSON.stringify({
                 creditAccount: selectedAccount.accountNumber,
                 providerId: provider.id,
-                amount: savedLoan.loanAmount,
+                amount: savedLoan.netDisbursedAmount ?? savedLoan.loanAmount,
                 loanId: savedLoan.id,
               }),
             });

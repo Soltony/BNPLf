@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { useToast } from '@/hooks/use-toast';
 import { postPendingChange } from '@/lib/fetch-utils';
 import { Loader2, Save, PlusCircle, Trash2 } from 'lucide-react';
@@ -77,6 +78,8 @@ function TaxCard({
             }
             const sanitizedAppliedTo = (() => {
                 try {
+                    // When inclusive tax is on, appliedTo is irrelevant (deducted from principal)
+                    if (config.isInclusive) return '[]';
                     const appliedTo = JSON.parse(config.appliedTo || '[]');
                     const filtered = Array.isArray(appliedTo)
                         ? appliedTo.filter((c: unknown) => c !== 'penalty')
@@ -148,18 +151,39 @@ function TaxCard({
                 </div>
                  <div className="space-y-4">
                     <Label>Apply Tax On</Label>
-                    <div className="space-y-2 rounded-md border p-4">
+                    <div className={`space-y-2 rounded-md border p-4 ${config.isInclusive ? 'opacity-50' : ''}`}>
                         {TAX_COMPONENTS.map(component => (
                             <div key={component.id} className="flex items-center space-x-2">
                                 <Checkbox
                                     id={`tax-on-${config.id}-${component.id}`}
                                     checked={JSON.parse(config.appliedTo).includes(component.id)}
                                     onCheckedChange={(checked) => handleComponentChange(component.id, !!checked)}
-                                    disabled={!canEdit}
+                                    disabled={!canEdit || config.isInclusive}
                                 />
                                 <Label htmlFor={`tax-on-${config.id}-${component.id}`} className="font-normal">{component.label}</Label>
                             </div>
                         ))}
+                    </div>
+                </div>
+                <div className="space-y-2">
+                    <div className="flex items-center justify-between rounded-md border p-4">
+                        <div>
+                            <Label htmlFor={`tax-inclusive-${config.id}`} className="font-medium">Inclusive Tax (Deduct from Principal)</Label>
+                            <p className="text-xs text-muted-foreground">When enabled, the tax is deducted upfront from the loan amount before disbursement.</p>
+                        </div>
+                        <Switch
+                            id={`tax-inclusive-${config.id}`}
+                            checked={config.isInclusive}
+                            onCheckedChange={(checked) => {
+                                setConfig(prev => ({
+                                    ...prev,
+                                    isInclusive: checked,
+                                    // When inclusive is enabled, clear appliedTo to prevent double-counting
+                                    appliedTo: checked ? '[]' : prev.appliedTo,
+                                }));
+                            }}
+                            disabled={!canEdit}
+                        />
                     </div>
                 </div>
             </CardContent>
@@ -251,7 +275,8 @@ export default function TaxSettingsPage() {
             name: 'New Tax',
             rate: 0,
             appliedTo: '[]',
-            status: 'Active',
+            isInclusive: false,
+            status: 'ACTIVE',
         };
         setTaxes(prev => [...prev, newTax]);
     }

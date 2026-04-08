@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
 
         // If user is Approver or not Super Admin, filter sensitive fields
         if (user.role === 'Approver' || user.role !== 'Super Admin') {
-            const filtered = configs.map(({ id, name, rate, status }) => ({ id, name, rate, status }));
+            const filtered = configs.map(({ id, name, rate, appliedTo, isInclusive, status }) => ({ id, name, rate, appliedTo, isInclusive, status }));
             return NextResponse.json(filtered);
         }
 

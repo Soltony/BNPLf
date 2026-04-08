@@ -167,8 +167,12 @@ export function RepaymentDialog({ isOpen, onClose, onConfirm, loan, totalBalance
             // Calculate penalty on FULL remaining loan principal
             const fullPrincipalOutstanding = Math.max(0, loan.loanAmount - totals.principalPaidFromInterestCalc);
             const penaltyRules = (loan.product as any).penaltyRules || [];
+            const penaltyPerInstallment = (loan.product as any).penaltyPerInstallment ?? false;
+            const penaltyDueDate = penaltyPerInstallment
+                ? new Date(activeInstallment.dueDate)
+                : new Date(loan.dueDate);
             const installmentPenalty = calculateInstallmentPenalty({
-                dueDate: new Date(activeInstallment.dueDate),
+                dueDate: penaltyDueDate,
                 principalOutstanding: fullPrincipalOutstanding,
                 penaltyRules,
                 asOfDate: asOfDate,

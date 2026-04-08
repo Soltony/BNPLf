@@ -1421,12 +1421,12 @@ async function applyChange(
       if (changeType === "UPDATE") {
         await prisma.tax.update({
           where: { id: entityId },
-          data: { ...data.updated, status: "Active" },
+          data: { ...data.updated, status: "ACTIVE" },
         });
       } else if (changeType === "CREATE") {
         const { id, ...creationData } = data.created;
         await prisma.tax.create({
-          data: { ...creationData, status: "Active" },
+          data: { ...creationData, status: "ACTIVE" },
         });
       } else if (changeType === "DELETE") {
         await prisma.tax.delete({ where: { id: entityId } });
@@ -1748,7 +1748,7 @@ export async function POST(req: NextRequest) {
         ) {
           await prisma.tax.update({
             where: { id: entityId },
-            data: { status: originalStatus || "Active" },
+            data: { status: originalStatus || "ACTIVE" },
           });
         }
       }

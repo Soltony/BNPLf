@@ -4,7 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { z } from 'zod';
-import { calculateTotalRepayable } from '@/lib/loan-calculator';
+import { calculateTotalRepayable, calculateInclusiveTax } from '@/lib/loan-calculator';
 import { loanCreationSchema } from '@/lib/schemas';
 import { checkLoanEligibility } from '@/actions/eligibility';
 import { getSalaryEntryForProduct, computeAllowedFromSalary } from '@/lib/salary-advance';
@@ -65,12 +65,18 @@ async function handlePersonalLoan(data: z.infer<typeof loanCreationSchema>) {
             new Date(data.disbursedDate)
         );
 
+        // Calculate inclusive tax (deducted upfront from principal before disbursement)
+        const inclusiveTaxAmount = calculateInclusiveTax(data.loanAmount, (taxConfigs ?? []) as any);
+        const netDisbursedAmount = inclusiveTaxAmount > 0
+            ? data.loanAmount - inclusiveTaxAmount
+            : data.loanAmount;
+
         const principalReceivableAccount = provider.ledgerAccounts.find((acc: any) => acc.category === 'Principal' && acc.type === 'Receivable');
         const serviceFeeReceivableAccount = provider.ledgerAccounts.find((acc: any) => acc.category === 'ServiceFee' && acc.type === 'Receivable');
         const taxReceivableAccount = provider.ledgerAccounts.find((acc: any) => acc.category === 'Tax' && acc.type === 'Receivable');
         if (!principalReceivableAccount) throw new Error('Principal Receivable ledger account not found.');
         if (calculatedServiceFee > 0 && !serviceFeeReceivableAccount) throw new Error('Service Fee Receivable ledger account not found.');
-        if (calculatedTax > 0 && !taxReceivableAccount) throw new Error('Tax Receivable ledger account not found.');
+        if ((calculatedTax > 0 || inclusiveTaxAmount > 0) && !taxReceivableAccount) throw new Error('Tax Receivable ledger account not found.');
 
 
         const createdLoan = await tx.loan.create({
@@ -85,6 +91,8 @@ async function handlePersonalLoan(data: z.infer<typeof loanCreationSchema>) {
                 penaltyAmount: 0,
                 repaymentStatus: 'Unpaid',
                 repaidAmount: 0,
+                taxDeducted: inclusiveTaxAmount,
+                netDisbursedAmount: netDisbursedAmount,
             }
         });
         
@@ -124,8 +132,28 @@ async function handlePersonalLoan(data: z.infer<typeof loanCreationSchema>) {
             await tx.ledgerAccount.update({ where: { id: taxReceivableAccount.id }, data: { balance: { increment: calculatedTax } } });
         }
 
+        // For inclusive tax: record the upfront deduction as a separate ledger entry
+        // and use tax Received to mark it as already collected at disbursement
+        if (inclusiveTaxAmount > 0 && taxReceivableAccount) {
+            const taxReceivedAccount = provider.ledgerAccounts.find((acc: any) => acc.category === 'Tax' && acc.type === 'Received');
+            // Record inclusive tax receivable (debit) and immediately mark as received (credit)
+            await tx.ledgerEntry.createMany({
+                data: [
+                    { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivableAccount.id, type: 'Debit', amount: inclusiveTaxAmount },
+                    { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivableAccount.id, type: 'Credit', amount: inclusiveTaxAmount },
+                ],
+            });
+            if (taxReceivedAccount) {
+                await tx.ledgerAccount.update({ where: { id: taxReceivedAccount.id }, data: { balance: { increment: inclusiveTaxAmount } } });
+                await tx.ledgerEntry.create({
+                    data: { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivedAccount.id, type: 'Debit', amount: inclusiveTaxAmount },
+                });
+            }
+        }
+
         await tx.ledgerAccount.update({ where: { id: principalReceivableAccount.id }, data: { balance: { increment: data.loanAmount } } });
-        await tx.loanProvider.update({ where: { id: provider.id }, data: { initialBalance: { decrement: data.loanAmount } } });
+        // Deduct net disbursed amount from provider funds (after inclusive tax)
+        await tx.loanProvider.update({ where: { id: provider.id }, data: { initialBalance: { decrement: netDisbursedAmount } } });
         
         return createdLoan;
     });
@@ -187,6 +215,8 @@ export async function POST(req: NextRequest) {
             productId: newLoan.productId,
             amount: newLoan.loanAmount,
             serviceFee: newLoan.serviceFee,
+            taxDeducted: newLoan.taxDeducted,
+            netDisbursedAmount: newLoan.netDisbursedAmount,
         };
         await createAuditLog({ actorId: 'system', action: 'LOAN_DISBURSEMENT_SUCCESS', entity: 'LOAN', entityId: newLoan.id, details: successLogDetails });
 

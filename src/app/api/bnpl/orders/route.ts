@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { calculateTotalRepayable } from '@/lib/loan-calculator';
+import { calculateTotalRepayable, calculateInclusiveTax } from '@/lib/loan-calculator';
 import { addDays } from 'date-fns';
 import { getDiscountEffectiveAmount, isDiscountActive, pickBestDiscount } from '@/lib/discount-utils';
 import { areDisbursementsEnabled } from '@/lib/disbursement-control';
@@ -123,7 +123,7 @@ export async function PUT(req: NextRequest) {
         }
 
         // Calculate service fee & tax
-        const taxConfigs = await prisma.tax.findMany();
+        const taxConfigs = await prisma.tax.findMany({ where: { status: 'ACTIVE' } });
         const tempLoanForCalc = {
           id: 'temp',
           loanAmount,
@@ -140,6 +140,10 @@ export async function PUT(req: NextRequest) {
         };
         const { serviceFee: calculatedServiceFee, tax: calculatedTax } =
           calculateTotalRepayable(tempLoanForCalc as any, product as any, (taxConfigs ?? []) as any, disbursedDate);
+
+        // Calculate inclusive tax (deducted from principal before disbursement)
+        const inclusiveTaxAmount = calculateInclusiveTax(loanAmount, (taxConfigs ?? []) as any);
+        const netDisbursedAmount = inclusiveTaxAmount > 0 ? loanAmount - inclusiveTaxAmount : loanAmount;
 
         // Find ledger accounts
         const principalReceivableAccount = provider.ledgerAccounts.find(
@@ -170,6 +174,8 @@ export async function PUT(req: NextRequest) {
             penaltyAmount: 0,
             repaymentStatus: 'Unpaid',
             repaidAmount: 0,
+            taxDeducted: inclusiveTaxAmount,
+            netDisbursedAmount: netDisbursedAmount,
           },
         });
 
@@ -235,10 +241,32 @@ export async function PUT(req: NextRequest) {
           });
         }
 
-        // Deduct provider balance
+        // Inclusive tax: record upfront deduction
+        if (inclusiveTaxAmount > 0 && taxReceivableAccount) {
+          const taxReceivedAccount = provider.ledgerAccounts.find(
+            (acc: any) => acc.category === 'Tax' && acc.type === 'Received'
+          );
+          await prisma.ledgerEntry.createMany({
+            data: [
+              { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivableAccount.id, type: 'Debit', amount: inclusiveTaxAmount },
+              { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivableAccount.id, type: 'Credit', amount: inclusiveTaxAmount },
+            ],
+          });
+          if (taxReceivedAccount) {
+            await prisma.ledgerAccount.update({
+              where: { id: taxReceivedAccount.id },
+              data: { balance: { increment: inclusiveTaxAmount } },
+            });
+            await prisma.ledgerEntry.create({
+              data: { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivedAccount.id, type: 'Debit', amount: inclusiveTaxAmount },
+            });
+          }
+        }
+
+        // Deduct provider balance (net of inclusive tax)
         await prisma.loanProvider.update({
           where: { id: provider.id },
-          data: { initialBalance: { decrement: loanAmount } },
+          data: { initialBalance: { decrement: netDisbursedAmount } },
         });
 
         // ── Create installment schedule ──
@@ -298,12 +326,12 @@ export async function PUT(req: NextRequest) {
               providerId: forcedProviderId,
               originalProviderId: provider.id,
               creditAccount,
-              amount: loanAmount,
+              amount: netDisbursedAmount,
               disbursementStatus: 'PENDING',
               requestPayload: JSON.stringify({
                 creditAccount,
                 providerId: forcedProviderId,
-                amount: loanAmount,
+                amount: netDisbursedAmount,
                 loanId: createdLoan.id,
                 merchantId: order.merchantId,
               }),
@@ -352,7 +380,7 @@ export async function PUT(req: NextRequest) {
                   body: JSON.stringify({
                     creditAccount,
                     providerId: forcedProviderId,
-                    amount: loanAmount,
+                    amount: netDisbursedAmount,
                   }),
                 });
 

@@ -387,3 +387,18 @@ export const calculateTotalRepayableDetailed = (loanDetails: LoanDetails, loanPr
         principalPaidFromInterestCalc: principalPaidFromInterestCalc,
     };
 };
+
+/**
+ * Calculate inclusive tax amount that should be deducted upfront from principal.
+ * Only active taxes with isInclusive=true are considered.
+ * The tax is calculated on the gross loan amount.
+ */
+export function calculateInclusiveTax(grossAmount: number, taxConfigs: Tax[]): number {
+    let inclusiveTax = 0;
+    for (const config of taxConfigs) {
+        if (config.isInclusive && config.rate > 0) {
+            inclusiveTax += grossAmount * (config.rate / 100);
+        }
+    }
+    return roundCurrency(inclusiveTax);
+}

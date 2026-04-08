@@ -186,7 +186,7 @@ function BnplOrdersPageInner() {
       if (providerId) {
         const res = await fetch(`/api/settings/delivery-agreement?providerId=${encodeURIComponent(providerId)}`);
         const data = await res.json();
-        setAgreementContent(data?.content || '');
+        setAgreementContent(data?.template?.content || '');
       } else {
         setAgreementContent('');
       }
