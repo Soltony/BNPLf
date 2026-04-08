@@ -24,7 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertCircle, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { calculateTotalRepayable } from "@/lib/loan-calculator";
+import { calculateTotalRepayable, calculateInclusiveTax } from "@/lib/loan-calculator";
 import {
   Collapsible,
   CollapsibleContent,
@@ -190,11 +190,22 @@ export function LoanOfferAndCalculator({
         dueDate
       );
 
+      const inclusiveTax = calculateInclusiveTax(numericLoanAmount, taxConfigs);
+      const inclusiveTaxItems = taxConfigs
+        .filter((t) => t.isInclusive && t.rate > 0 && (!t.status || t.status === "ACTIVE"))
+        .map((t) => ({
+          name: t.name || "Inclusive Tax",
+          amount: Math.round(numericLoanAmount * (t.rate / 100) * 100) / 100,
+        }));
+
       setCalculationResult({
         ...result,
         disbursedDate,
         dueDate,
         penaltyAmount: 0,
+        inclusiveTax,
+        inclusiveTaxItems,
+        netDisbursedAmount: numericLoanAmount - inclusiveTax,
       });
     };
 
@@ -363,6 +374,41 @@ export function LoanOfferAndCalculator({
                     <div className="font-medium">Tax</div>
                     <div className="text-right">
                       {formatCurrency(calculationResult.tax)}
+                    </div>
+                  </div>
+                )}
+
+                {calculationResult.inclusiveTax > 0 && (
+                  calculationResult.inclusiveTaxItems?.length > 0
+                    ? calculationResult.inclusiveTaxItems.map((item: { name: string; amount: number }, idx: number) => (
+                        <div key={idx} className="flex justify-between items-center text-amber-700 bg-amber-50 -mx-4 px-4 py-2">
+                          <div className="font-medium text-xs">
+                            {item.name} <span className="text-muted-foreground">(Deducted from Principal)</span>
+                          </div>
+                          <div className="text-right font-semibold text-xs">
+                            - {formatCurrency(item.amount)}
+                          </div>
+                        </div>
+                      ))
+                    : (
+                        <div className="flex justify-between items-center text-amber-700 bg-amber-50 -mx-4 px-4 py-2">
+                          <div className="font-medium text-xs">
+                            Inclusive Tax <span className="text-muted-foreground">(Deducted from Principal)</span>
+                          </div>
+                          <div className="text-right font-semibold text-xs">
+                            - {formatCurrency(calculationResult.inclusiveTax)}
+                          </div>
+                        </div>
+                      )
+                )}
+
+                {calculationResult.inclusiveTax > 0 && (
+                  <div className="flex justify-between items-center">
+                    <div className="font-medium text-xs">
+                      Net Disbursed Amount
+                    </div>
+                    <div className="text-right font-semibold text-xs">
+                      {formatCurrency(calculationResult.netDisbursedAmount)}
                     </div>
                   </div>
                 )}

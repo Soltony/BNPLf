@@ -369,10 +369,16 @@ export function ApplyClient({
           {/* If borrowerId is provided by the super-app, automatically show account selector */}
           {/* Show selected account summary when available */}
           {selectedAccount ? (
-            <div className="mb-6">
-              <div className="text-sm">Selected account for disbursement:</div>
-              <div className="font-mono">
-                {selectedAccount.accountNumber} — {selectedAccount.customerName}
+            <div className="mb-6 mx-auto max-w-2xl">
+              <div className="flex items-center gap-3 rounded-xl border bg-gradient-to-r from-slate-50 to-white p-4 shadow-sm">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-muted-foreground">Selected Account</p>
+                  <p className="truncate text-sm font-semibold">{selectedAccount.customerName}</p>
+                  <p className="font-mono text-xs text-muted-foreground tracking-wide">{selectedAccount.accountNumber}</p>
+                </div>
               </div>
             </div>
           ) : null}
