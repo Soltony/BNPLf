@@ -217,7 +217,7 @@ async function handlePersonalLoan(
     }
 
     // Create a PENDING DisbursementTransaction record linked to this loan
-    const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? "PRO0001";
+    const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? "PRO0002";
     const creditAccount =
       data.creditAccount || data.borrowerAccountNumber || "";
 

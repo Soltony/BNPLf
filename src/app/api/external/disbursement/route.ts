@@ -116,8 +116,8 @@ export async function POST(req: Request) {
 
     const body: Body = await req.json();
     const { creditAccount: requestedCreditAccount, providerId, amount, loanId } = body;
-    // For testing: force the provider id to PRO0001 unless overridden by env
-    const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? "PRO0001";
+    // For testing: force the provider id to PRO0002 unless overridden by env
+    const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? "PRO0002";
     const sendProviderId = forcedProviderId;
     if (!requestedCreditAccount || !providerId || !amount)
       return NextResponse.json(

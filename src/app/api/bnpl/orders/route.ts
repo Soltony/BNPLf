@@ -306,7 +306,7 @@ export async function PUT(req: NextRequest) {
         });
 
         // ── Disbursement to Merchant Account ──
-        const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? 'PRO0001';
+        const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? 'PRO0002';
 
         // Credit the merchant's account (not the borrower's)
         const merchant = await prisma.merchant.findUnique({
