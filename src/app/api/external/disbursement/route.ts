@@ -8,6 +8,7 @@ import {
   auditExternalApiResponse,
   newAuditCorrelationId,
 } from "@/lib/audit-log";
+import { getSession } from "@/lib/session";
 
 type Body = {
   creditAccount: string;
@@ -80,9 +81,15 @@ async function findOrCreateDisbursementTransaction(
 
 export async function POST(req: Request) {
   try {
+    // ── Authentication: enforce session auth (middleware guards this path) ──
+    const session = await getSession();
+    if (!session?.userId) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+    }
+
     const ipAddress = req.headers.get("x-forwarded-for") || "N/A";
     const userAgent = req.headers.get("user-agent") || "N/A";
-    const actorId = "system";
+    const actorId = session.userId;
 
     const enabled = await areDisbursementsEnabled();
     if (!enabled) {

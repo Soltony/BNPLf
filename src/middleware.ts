@@ -63,7 +63,7 @@ function withSecurityHeaders(res: NextResponse, csp: string, nonce: string) {
 const protectedAdminRoutes = [
   '/admin', '/api/admin', '/api/audit-logs', '/api/approvals', '/api/roles',
   '/api/settings', '/api/providers', '/api/users', '/api/reports',
-  '/api/merchants', '/api/branches', '/api/inventory'
+  '/api/merchants', '/api/branches', '/api/inventory', '/api/external'
 ];
 const publicRoutes = ['/admin/login', '/loan/connect', '/admin/change-password'];
 
