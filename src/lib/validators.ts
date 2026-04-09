@@ -99,6 +99,110 @@ export const scoringRulesSchema = z.object({
   }))
 });
 
+// ---------------------------------------------------------------------------
+// Image data-URI validation (used for merchant icons & item images)
+// ---------------------------------------------------------------------------
+
+const ALLOWED_IMAGE_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+]);
+
+// Magic-byte signatures for common image formats
+const IMAGE_SIGNATURES: Array<{ mime: string; bytes: number[] }> = [
+  { mime: 'image/jpeg', bytes: [0xFF, 0xD8, 0xFF] },
+  { mime: 'image/png',  bytes: [0x89, 0x50, 0x4E, 0x47] },
+  { mime: 'image/gif',  bytes: [0x47, 0x49, 0x46] },
+  { mime: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] }, // RIFF header
+];
+
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB per image
+
+/**
+ * Validate a single base64 data-URI string.
+ * Returns `null` on success or an error message string.
+ */
+export function validateImageDataUri(dataUri: string): string | null {
+  if (!dataUri || typeof dataUri !== 'string') {
+    return 'Invalid image data.';
+  }
+
+  // Must be a data URI
+  const match = dataUri.match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) {
+    return 'Invalid image format. Please upload a valid image file.';
+  }
+
+  const mimeType = match[1].toLowerCase();
+  const base64Data = match[2];
+
+  // MIME type allow-list
+  if (!ALLOWED_IMAGE_MIME_TYPES.has(mimeType)) {
+    return `File type "${mimeType}" is not allowed. Please upload a JPEG, PNG, GIF, or WebP image.`;
+  }
+
+  // Decode enough bytes to check magic signature & size
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(base64Data, 'base64');
+  } catch {
+    return 'Could not decode file data. Please upload a valid image file.';
+  }
+
+  // Size check
+  if (buffer.length > MAX_IMAGE_SIZE_BYTES) {
+    return `Image exceeds the maximum allowed size of ${MAX_IMAGE_SIZE_BYTES / (1024 * 1024)} MB.`;
+  }
+
+  // Magic-byte verification — the declared MIME must match actual file content
+  const sig = IMAGE_SIGNATURES.find(s => s.mime === mimeType);
+  if (sig) {
+    const headerBytes = buffer.slice(0, sig.bytes.length);
+    const matches = sig.bytes.every((b, i) => headerBytes[i] === b);
+    if (!matches) {
+      return 'File content does not match the declared image type. Please upload a valid image file.';
+    }
+  }
+
+  return null; // valid
+}
+
+/**
+ * Validate either a single image data-URI or a JSON-stringified array of them.
+ * Returns `null` on success or an error message string.
+ */
+export function validateImageField(value: string | null | undefined, fieldLabel = 'Image'): string | null {
+  if (!value) return null; // optional field
+
+  // Try JSON array first (item images are stored as JSON arrays of data URIs)
+  let uris: string[];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      uris = parsed;
+    } else {
+      uris = [value];
+    }
+  } catch {
+    uris = [value];
+  }
+
+  if (uris.length > 10) {
+    return `${fieldLabel}: a maximum of 10 images is allowed.`;
+  }
+
+  for (let i = 0; i < uris.length; i++) {
+    const err = validateImageDataUri(uris[i]);
+    if (err) {
+      return uris.length > 1 ? `${fieldLabel} #${i + 1}: ${err}` : `${fieldLabel}: ${err}`;
+    }
+  }
+
+  return null;
+}
+
 export default {
   validateBody,
   loginSchema,

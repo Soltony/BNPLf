@@ -31,9 +31,9 @@ function isUpstreamSuccess(payload: any): payload is UpstreamDistributionSuccess
 }
 
 function getUpstreamConfig() {
-  const url = process.env.EXTERNAL_DISTRIBUTION_URL ?? 'http://192.168.100.56:8280/nibtera-loan/distribution';
-  const user = process.env.EXTERNAL_API_USERNAME ?? 'nibLoan';
-  const pass = process.env.EXTERNAL_API_PASSWORD ?? '123456';
+  const url = process.env.EXTERNAL_DISTRIBUTION_URL;
+  const user = process.env.EXTERNAL_API_USERNAME;
+  const pass = process.env.EXTERNAL_API_PASSWORD;
   const auth = 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
 
   return { url, auth };

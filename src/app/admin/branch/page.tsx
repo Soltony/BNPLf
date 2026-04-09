@@ -221,7 +221,17 @@ export default function BranchPage() {
             bnplEnabled: merchantBnplEnabled,
           };
       const res = await fetch('/api/merchants', { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+      if (!res.ok) {
+        let msg = 'An unexpected error occurred. Please try again.';
+        try {
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const err = await res.json();
+            msg = err.error || msg;
+          }
+        } catch { /* ignore parse errors */ }
+        throw new Error(msg);
+      }
       toast({ title: editingMerchant ? 'Update submitted for approval' : 'Merchant submitted for approval' });
       setMerchantDialogOpen(false);
       resetMerchantForm();
@@ -497,10 +507,23 @@ export default function BranchPage() {
                             {merchantIconFile ? merchantIconFile.name : 'Upload icon'}
                             <input
                               type="file"
-                              accept="image/*"
+                              accept="image/jpeg,image/png,image/gif,image/webp"
                               className="hidden"
                               onChange={(e) => {
                                 const file = e.target.files?.[0] || null;
+                                if (file) {
+                                  const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                                  if (!ALLOWED_TYPES.includes(file.type)) {
+                                    toast({ title: 'Invalid file type', description: 'Please upload a JPEG, PNG, GIF, or WebP image.', variant: 'destructive' });
+                                    e.target.value = '';
+                                    return;
+                                  }
+                                  if (file.size > 5 * 1024 * 1024) {
+                                    toast({ title: 'File too large', description: 'Image must be under 5 MB.', variant: 'destructive' });
+                                    e.target.value = '';
+                                    return;
+                                  }
+                                }
                                 setMerchantIconFile(file);
                                 if (file) {
                                   const reader = new FileReader();

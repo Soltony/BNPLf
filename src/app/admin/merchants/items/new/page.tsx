@@ -205,7 +205,17 @@ export default function NewItemPage() {
         }),
       });
 
-      if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+      if (!res.ok) {
+        let msg = 'An unexpected error occurred. Please try again.';
+        try {
+          const ct = res.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const err = await res.json();
+            msg = err.error || msg;
+          }
+        } catch { /* ignore parse errors */ }
+        throw new Error(msg);
+      }
       const createdItem = await res.json();
 
       // Save combination inventory rows if any
@@ -320,11 +330,29 @@ export default function NewItemPage() {
             )}
             <div>
               <Label>Images (first image is the main display image)</Label>
-              <Input type="file" accept="image/*" multiple onChange={e => {
-                const files = Array.from(e.target.files || []);
-                setImageFiles(files);
+              <Input type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple onChange={e => {
+                const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                const MAX_SIZE = 5 * 1024 * 1024; // 5 MB
+                const rawFiles = Array.from(e.target.files || []);
+                const validFiles: File[] = [];
+                for (const f of rawFiles) {
+                  if (!ALLOWED_TYPES.includes(f.type)) {
+                    toast({ title: 'Invalid file type', description: `"${f.name}" is not an allowed image type. Use JPEG, PNG, GIF, or WebP.`, variant: 'destructive' });
+                    continue;
+                  }
+                  if (f.size > MAX_SIZE) {
+                    toast({ title: 'File too large', description: `"${f.name}" exceeds the 5 MB limit.`, variant: 'destructive' });
+                    continue;
+                  }
+                  validFiles.push(f);
+                }
+                if (validFiles.length > 10) {
+                  toast({ title: 'Too many images', description: 'A maximum of 10 images is allowed.', variant: 'destructive' });
+                  validFiles.length = 10;
+                }
+                setImageFiles(validFiles);
                 // Generate previews
-                Promise.all(files.map(f => new Promise<string>((resolve) => {
+                Promise.all(validFiles.map(f => new Promise<string>((resolve) => {
                   const reader = new FileReader();
                   reader.onload = () => resolve(reader.result as string);
                   reader.readAsDataURL(f);

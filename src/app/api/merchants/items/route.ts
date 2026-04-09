@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { getUserFromSession } from '@/lib/user';
 import { createAuditLog } from '@/lib/audit-log';
+import { validateImageField } from '@/lib/validators';
 
 function normalizeOptionGroups(groups: any[]): Array<{ name: string; values: Array<{ label: string; priceDelta: number }> }> {
   return (groups || [])
@@ -60,6 +61,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'merchantId, categoryId, name, and price are required' }, { status: 400 });
     }
 
+    // Validate image(s) if provided
+    const imageError = validateImageField(imageUrl, 'Image');
+    if (imageError) return NextResponse.json({ error: imageError }, { status: 400 });
+
     const pending = await prisma.pendingChange.create({
       data: {
         entityType: 'MerchantItem',
@@ -111,6 +116,12 @@ export async function PUT(req: NextRequest) {
     // Merchant users can only update their own items
     if (user.merchantId && existing.merchantId !== user.merchantId) {
       return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+    }
+
+    // Validate image(s) if a new value is provided
+    if (imageUrl !== undefined && imageUrl) {
+      const imageError = validateImageField(imageUrl, 'Image');
+      if (imageError) return NextResponse.json({ error: imageError }, { status: 400 });
     }
 
     const pending = await prisma.pendingChange.create({

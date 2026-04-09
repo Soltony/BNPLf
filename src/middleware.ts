@@ -215,7 +215,8 @@ export default async function middleware(req: NextRequest) {
         headers: {
           cookie: cookieHeader,
           'x-auth-session-check': 'middleware',
-        }
+        },
+        cache: 'no-store',
       });
     } catch (e) {
       console.error('Failed to fetch session in middleware:', e);

@@ -90,10 +90,12 @@ export default function ChangePasswordPage() {
         description: 'Please log in with your new password.',
       });
       
-      // Log the user out and redirect to login
+      // Log the user out and redirect to login.
+      // Use a full page reload (window.location) instead of client-side
+      // router.push to ensure Next.js Router Cache is cleared and the
+      // server sees the updated session state in production builds.
       await logout();
-      router.push('/admin/login');
-      router.refresh();
+      window.location.href = '/admin/login';
 
     } catch (err: any) {
       setError(err.message);

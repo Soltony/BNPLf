@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { getUserFromSession } from '@/lib/user';
 import { createAuditLog } from '@/lib/audit-log';
+import { validateImageField } from '@/lib/validators';
 
 export async function GET() {
   const user = await getUserFromSession();
@@ -34,6 +35,10 @@ export async function POST(req: NextRequest) {
     if (!contactPersonPhone?.trim()) return NextResponse.json({ error: 'Contact person phone is required' }, { status: 400 });
     if (!/^(09\d{8}|9\d{8}|\+2519\d{8})$/.test(contactPersonPhone.trim())) return NextResponse.json({ error: 'Invalid Ethiopian phone format' }, { status: 400 });
     if (contactPersonEmail?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactPersonEmail.trim())) return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
+
+    // Validate icon image if provided
+    const iconError = validateImageField(iconUrl, 'Icon');
+    if (iconError) return NextResponse.json({ error: iconError }, { status: 400 });
 
     // Create as PendingChange for maker-checker
     const pending = await prisma.pendingChange.create({
@@ -96,6 +101,12 @@ export async function PUT(req: NextRequest) {
     if (finalContactPhone?.trim() && !/^(09\d{8}|9\d{8}|\+2519\d{8})$/.test(finalContactPhone.trim())) return NextResponse.json({ error: 'Invalid Ethiopian phone format' }, { status: 400 });
     const finalContactEmail = contactPersonEmail !== undefined ? contactPersonEmail : existing.contactPersonEmail;
     if (finalContactEmail?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(finalContactEmail.trim())) return NextResponse.json({ error: 'Invalid email address' }, { status: 400 });
+
+    // Validate icon image if provided
+    if (iconUrl !== undefined && iconUrl) {
+      const iconError = validateImageField(iconUrl, 'Icon');
+      if (iconError) return NextResponse.json({ error: iconError }, { status: 400 });
+    }
 
     const pending = await prisma.pendingChange.create({
       data: {
