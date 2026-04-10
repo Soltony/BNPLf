@@ -267,6 +267,7 @@ async function applyEligibilityList(change: any, data: any) {
   await prisma.loanProduct.update({
     where: { id: productId },
     data: {
+      dataProvisioningEnabled: true,
       eligibilityUploadId: newUpload.id,
       eligibilityFilter: filterObject,
     },
