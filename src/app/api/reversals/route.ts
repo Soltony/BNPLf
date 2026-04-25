@@ -204,25 +204,40 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const rows = loansWithoutDisbursement.map((loan) => ({
-      id: `loan-${loan.id}`,
-      transactionId: null,
-      providerId: loan.product?.provider?.id || null,
-      originalProviderId: loan.product?.provider?.id || null,
-      creditAccount: accountByBorrower.get(loan.borrowerId) || null,
-      borrowerAccountNumber: accountByBorrower.get(loan.borrowerId) || null,
-      amount: loan.loanAmount,
-      statusCode: null,
-      createdAt: loan.createdAt.toISOString(),
-      borrowerId: loan.borrowerId,
-      loanId: loan.id,
-      reversed: reversedByLoanId.get(loan.id) ?? null,
-      cancelled: cancelledByLoanId.get(loan.id) ?? null,
-      pendingApproval: pendingByLoanId.get(loan.id) ?? null,
-      isFailure: false,
-      isPosted: true, // Flag to indicate internally posted without external disbursement
-      disbursementStatus: "POSTED",
-    }));
+    const rows = loansWithoutDisbursement.map((loan) => {
+      // Determine borrower account similar to reports: prefer PhoneAccount mapping,
+      // fall back to provisioned data on the borrower record when available.
+      let borrowerAccount: string | null = accountByBorrower.get(loan.borrowerId) || null;
+      try {
+        if (!borrowerAccount) {
+          const pd = (loan as any)?.borrower?.provisionedData?.[0]?.data;
+          if (pd) {
+            const parsed = JSON.parse(pd);
+            borrowerAccount = parsed.accountNumber || parsed.account || parsed.customerAccount || parsed.account_no || borrowerAccount;
+          }
+        }
+      } catch (e) {}
+
+      return {
+        id: `loan-${loan.id}`,
+        transactionId: null,
+        providerId: loan.product?.provider?.id || null,
+        originalProviderId: loan.product?.provider?.id || null,
+        creditAccount: accountByBorrower.get(loan.borrowerId) || null,
+        borrowerAccountNumber: borrowerAccount,
+        amount: loan.loanAmount,
+        statusCode: null,
+        createdAt: loan.createdAt.toISOString(),
+        borrowerId: loan.borrowerId,
+        loanId: loan.id,
+        reversed: reversedByLoanId.get(loan.id) ?? null,
+        cancelled: cancelledByLoanId.get(loan.id) ?? null,
+        pendingApproval: pendingByLoanId.get(loan.id) ?? null,
+        isFailure: false,
+        isPosted: true, // Flag to indicate internally posted without external disbursement
+        disbursementStatus: "POSTED",
+      };
+    });
 
     return NextResponse.json({
       page,
@@ -383,6 +398,27 @@ export async function GET(req: NextRequest) {
       const reversed = reversalById.get(t.id) ?? null;
       const borrowerId = phoneByAccount.get(t.creditAccount) ?? null;
 
+      // Determine borrower account number similar to reports logic:
+      // 1) preferred PhoneAccount mapping (accountByPhone)
+      // 2) fallback to loan->borrower provisionedData (account fields)
+      let borrowerAccount: string | null = borrowerId ? accountByPhone.get(borrowerId) || null : null;
+      // Attempt to fetch loan provisioned data when loanId is available and no account found
+      if (!borrowerAccount && (t as any).loanId) {
+        try {
+          const loanRec = await prisma.loan.findUnique({
+            where: { id: String((t as any).loanId) },
+            include: { borrower: { include: { provisionedData: { orderBy: { createdAt: "desc" }, take: 1 } } } },
+          });
+          const pd = (loanRec as any)?.borrower?.provisionedData?.[0]?.data;
+          if (pd) {
+            const parsed = JSON.parse(pd);
+            borrowerAccount = parsed.accountNumber || parsed.account || parsed.customerAccount || parsed.account_no || borrowerAccount;
+          }
+        } catch (e) {
+          // ignore parse/lookup errors
+        }
+      }
+
       // best-effort loan resolution
       let loanId: string | null = null;
       if (borrowerId && t.amount != null) {
@@ -409,7 +445,7 @@ export async function GET(req: NextRequest) {
         providerId: t.providerId,
         originalProviderId: t.originalProviderId,
         creditAccount: t.creditAccount,
-        borrowerAccountNumber: borrowerId ? accountByPhone.get(borrowerId) || null : null,
+      borrowerAccountNumber: borrowerAccount,
         amount: t.amount,
         statusCode: t.statusCode,
         createdAt: t.createdAt.toISOString(),
