@@ -1,7 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import prisma from '@/lib/prisma';
 import { getUserFromSession } from '@/lib/user';
 import { createAuditLog } from '@/lib/audit-log';
+
+const DEFAULT_PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 100;
+
+function parsePositiveInt(value: string | null, fallback: number) {
+  const parsed = Number.parseInt(value || '', 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+
+  return parsed;
+}
 
 export async function GET(req: NextRequest) {
   const user = await getUserFromSession();
@@ -10,25 +23,107 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const merchantId = searchParams.get('merchantId');
-    const where: any = {};
+    const page = parsePositiveInt(searchParams.get('page'), 1);
+    const pageSize = Math.min(MAX_PAGE_SIZE, parsePositiveInt(searchParams.get('pageSize'), DEFAULT_PAGE_SIZE));
+    const search = searchParams.get('search')?.trim() || '';
+    const status = searchParams.get('status')?.trim() || '';
+    const paymentType = searchParams.get('paymentType')?.trim() || '';
+
+    const where: Prisma.OrderWhereInput = {};
+
     if (merchantId) where.merchantId = merchantId;
     if (user.merchantId) where.merchantId = user.merchantId;
 
-    const orders = await prisma.order.findMany({
-      where,
-      include: {
-        merchant: true,
-        orderItems: {
-          include: {
-            item: true,
-            variant: true,
-            optionSelections: { include: { optionValue: { include: { group: true } } } },
+    if (status && status !== 'ALL') {
+      where.status = status;
+    }
+
+    if (paymentType && paymentType !== 'ALL') {
+      where.paymentType = paymentType;
+    }
+
+    if (search) {
+      where.OR = [
+        { id: { contains: search } },
+        { borrowerId: { contains: search } },
+        { merchant: { name: { contains: search } } },
+        {
+          orderItems: {
+            some: {
+              item: {
+                name: { contains: search },
+              },
+            },
           },
         },
+      ];
+    }
+
+    const total = await prisma.order.count({ where });
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const safePage = Math.min(page, totalPages);
+
+    const orders = total === 0
+      ? []
+      : await prisma.order.findMany({
+        where,
+        select: {
+          id: true,
+          borrowerId: true,
+          totalAmount: true,
+          currency: true,
+          paymentType: true,
+          status: true,
+          cancelReason: true,
+          createdAt: true,
+          merchant: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          orderItems: {
+            select: {
+              id: true,
+              item: {
+                select: {
+                  name: true,
+                },
+              },
+              optionSelections: {
+                select: {
+                  id: true,
+                  optionValue: {
+                    select: {
+                      label: true,
+                      group: {
+                        select: {
+                          name: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (safePage - 1) * pageSize,
+        take: pageSize,
+      });
+
+    return NextResponse.json({
+      data: orders,
+      pagination: {
+        page: safePage,
+        pageSize,
+        total,
+        totalPages,
+        hasNextPage: safePage < totalPages,
+        hasPreviousPage: safePage > 1,
       },
-      orderBy: { createdAt: 'desc' },
     });
-    return NextResponse.json(orders);
   } catch (error) {
     console.error('Error fetching orders:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
