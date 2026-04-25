@@ -379,7 +379,7 @@ export default async function middleware(req: NextRequest) {
 
     // menu permission read check
     if (currentRouteConfig) {
-      const moduleName = currentRouteConfig.label.toLowerCase().replace(/\s+/g, '-');
+      const moduleName = currentRouteConfig.permissionKey || currentRouteConfig.label.toLowerCase().replace(/\s+/g, '-');
       const hasPermission = !!permissions[moduleName]?.read;
 
       if (!hasPermission) {

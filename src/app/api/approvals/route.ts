@@ -10,6 +10,10 @@ import ExcelJS from "exceljs";
 import { toCamelCase } from "@/lib/utils";
 import { Prisma } from "@prisma/client";
 import { normalizeDiscountEndDate, normalizeDiscountStartDate } from "@/lib/discount-utils";
+import { calculateTotalRepayable } from "@/lib/loan-calculator";
+import { startOfDay, isBefore, isEqual } from "date-fns";
+import { getAsOfDate } from "@/lib/date-utils";
+import type { RepaymentBehavior } from "@prisma/client";
 
 const approvalSchema = z.object({
   changeId: z.string(),
@@ -1639,6 +1643,302 @@ async function applyChange(
       }
       break;
 
+    case "PaymentMarkSuccessful":
+      if (changeType !== "CREATE") {
+        throw new Error("Invalid changeType for PaymentMarkSuccessful");
+      }
+
+      {
+        const actorId = context?.actorId;
+        const ipAddress = context?.ipAddress || "N/A";
+        const userAgent = context?.userAgent || "N/A";
+        const pendingPaymentId = data?.created?.pendingPaymentId || entityId;
+        const cbsTransactionId = data?.created?.cbsTransactionId;
+        const txnRef = data?.created?.transactionId; // PendingPayment.transactionId
+
+        if (!pendingPaymentId) throw new Error("Missing pendingPaymentId");
+        if (!cbsTransactionId) throw new Error("Missing CBS transaction ID");
+
+        const pendingPayment = await prisma.pendingPayment.findUnique({
+          where: { id: String(pendingPaymentId) },
+        });
+        if (!pendingPayment) throw new Error("PendingPayment not found");
+        if (pendingPayment.status !== "PENDING") {
+          throw new Error(`Payment is already ${pendingPayment.status}`);
+        }
+
+        const { loanId, amount: paymentAmount, borrowerId } = pendingPayment;
+
+        const [loan, taxConfigs] = await Promise.all([
+          prisma.loan.findUnique({
+            where: { id: loanId },
+            include: {
+              product: {
+                include: { provider: { include: { ledgerAccounts: true } } },
+              },
+              payments: { orderBy: { date: "asc" } },
+            },
+          }),
+          prisma.tax.findMany({ where: { status: "ACTIVE" } }),
+        ]);
+        if (!loan) throw new Error(`Loan with ID ${loanId} not found.`);
+
+        const provider = loan.product.provider;
+        const paymentDate = getAsOfDate();
+        const alreadyRepaid = loan.repaidAmount || 0;
+
+        const totals = calculateTotalRepayable(
+          loan as any,
+          loan.product as any,
+          taxConfigs as any,
+          paymentDate
+        );
+        const totalDue = totals.total - alreadyRepaid;
+
+        if (paymentAmount > totalDue + 0.01) {
+          throw new Error("Payment amount exceeds balance due.");
+        }
+
+        await prisma.$transaction(async (tx) => {
+          const journalEntry = await tx.journalEntry.create({
+            data: {
+              providerId: provider.id,
+              loanId: loan.id,
+              date: paymentDate,
+              description: `Manual repayment for loan ${loan.id} via TxRef ${txnRef || pendingPaymentId} FT:${cbsTransactionId}`,
+            },
+          });
+
+          const principalReceivable = provider.ledgerAccounts.find(
+            (a) => a.category === "Principal" && a.type === "Receivable"
+          );
+          const interestReceivable = provider.ledgerAccounts.find(
+            (a) => a.category === "Interest" && a.type === "Receivable"
+          );
+          const penaltyReceivable = provider.ledgerAccounts.find(
+            (a) => a.category === "Penalty" && a.type === "Receivable"
+          );
+          const serviceFeeReceivable = provider.ledgerAccounts.find(
+            (a) => a.category === "ServiceFee" && a.type === "Receivable"
+          );
+          const taxReceivable = provider.ledgerAccounts.find(
+            (a) => a.category === "Tax" && a.type === "Receivable"
+          );
+          const principalReceived = provider.ledgerAccounts.find(
+            (a) => a.category === "Principal" && a.type === "Received"
+          );
+          const interestReceived = provider.ledgerAccounts.find(
+            (a) => a.category === "Interest" && a.type === "Received"
+          );
+          const penaltyReceived = provider.ledgerAccounts.find(
+            (a) => a.category === "Penalty" && a.type === "Received"
+          );
+          const serviceFeeReceived = provider.ledgerAccounts.find(
+            (a) => a.category === "ServiceFee" && a.type === "Received"
+          );
+          const taxReceived = provider.ledgerAccounts.find(
+            (a) => a.category === "Tax" && a.type === "Received"
+          );
+          const interestIncome = provider.ledgerAccounts.find(
+            (a) => a.category === "Interest" && a.type === "Income"
+          );
+          const penaltyIncome = provider.ledgerAccounts.find(
+            (a) => a.category === "Penalty" && a.type === "Income"
+          );
+          const serviceFeeIncome = provider.ledgerAccounts.find(
+            (a) => a.category === "ServiceFee" && a.type === "Income"
+          );
+
+          if (
+            !principalReceivable || !interestReceivable || !penaltyReceivable ||
+            !serviceFeeReceivable || !taxReceivable || !principalReceived ||
+            !interestReceived || !penaltyReceived || !serviceFeeReceived || !taxReceived
+          ) {
+            throw new Error(`One or more ledger accounts not found for provider ${provider.id}`);
+          }
+
+          const ledgerEntryCreates: Array<{
+            journalEntryId: string;
+            ledgerAccountId: string;
+            type: string;
+            amount: number;
+          }> = [];
+
+          let amountToApply = paymentAmount;
+
+          const alreadyPaidPenalty = Math.min(totals.penalty, alreadyRepaid);
+          const alreadyPaidServiceFee = Math.min(totals.serviceFee, Math.max(0, alreadyRepaid - totals.penalty));
+          const alreadyPaidInterest = Math.min(totals.interest, Math.max(0, alreadyRepaid - totals.penalty - totals.serviceFee));
+          const alreadyPaidTax = Math.min(totals.tax, Math.max(0, alreadyRepaid - totals.penalty - totals.serviceFee - totals.interest));
+          const alreadyPaidPrincipal = Math.min(totals.principal, Math.max(0, alreadyRepaid - totals.penalty - totals.serviceFee - totals.interest - totals.tax));
+
+          // Penalty
+          const penaltyDue = Math.max(0, totals.penalty - alreadyPaidPenalty);
+          const penaltyToPay = Math.min(amountToApply, penaltyDue);
+          if (penaltyToPay > 0) {
+            await tx.ledgerAccount.update({ where: { id: penaltyReceivable.id }, data: { balance: { decrement: penaltyToPay } } });
+            await tx.ledgerAccount.update({ where: { id: penaltyReceived.id }, data: { balance: { increment: penaltyToPay } } });
+            if (!penaltyIncome) throw new Error(`Penalty Income ledger not found for provider ${provider.id}`);
+            await tx.ledgerAccount.update({ where: { id: penaltyIncome.id }, data: { balance: { increment: penaltyToPay } } });
+            ledgerEntryCreates.push(
+              { journalEntryId: journalEntry.id, ledgerAccountId: penaltyReceivable.id, type: "Credit", amount: penaltyToPay },
+              { journalEntryId: journalEntry.id, ledgerAccountId: penaltyReceived.id, type: "Debit", amount: penaltyToPay },
+              { journalEntryId: journalEntry.id, ledgerAccountId: penaltyIncome.id, type: "Credit", amount: penaltyToPay },
+            );
+            amountToApply -= penaltyToPay;
+          }
+
+          // Service Fee
+          const serviceFeeDue = Math.max(0, totals.serviceFee - alreadyPaidServiceFee);
+          const serviceFeeToPay = Math.min(amountToApply, serviceFeeDue);
+          if (serviceFeeToPay > 0) {
+            await tx.ledgerAccount.update({ where: { id: serviceFeeReceivable.id }, data: { balance: { decrement: serviceFeeToPay } } });
+            await tx.ledgerAccount.update({ where: { id: serviceFeeReceived.id }, data: { balance: { increment: serviceFeeToPay } } });
+            if (!serviceFeeIncome) throw new Error(`Service Fee Income ledger not found for provider ${provider.id}`);
+            await tx.ledgerAccount.update({ where: { id: serviceFeeIncome.id }, data: { balance: { increment: serviceFeeToPay } } });
+            ledgerEntryCreates.push(
+              { journalEntryId: journalEntry.id, ledgerAccountId: serviceFeeReceivable.id, type: "Credit", amount: serviceFeeToPay },
+              { journalEntryId: journalEntry.id, ledgerAccountId: serviceFeeReceived.id, type: "Debit", amount: serviceFeeToPay },
+              { journalEntryId: journalEntry.id, ledgerAccountId: serviceFeeIncome.id, type: "Credit", amount: serviceFeeToPay },
+            );
+            amountToApply -= serviceFeeToPay;
+          }
+
+          // Interest
+          const interestDue = Math.max(0, totals.interest - alreadyPaidInterest);
+          const interestToPay = Math.min(amountToApply, interestDue);
+          if (interestToPay > 0) {
+            await tx.ledgerAccount.update({ where: { id: interestReceivable.id }, data: { balance: { decrement: interestToPay } } });
+            await tx.ledgerAccount.update({ where: { id: interestReceived.id }, data: { balance: { increment: interestToPay } } });
+            if (!interestIncome) throw new Error(`Interest Income ledger not found for provider ${provider.id}`);
+            await tx.ledgerAccount.update({ where: { id: interestIncome.id }, data: { balance: { increment: interestToPay } } });
+            ledgerEntryCreates.push(
+              { journalEntryId: journalEntry.id, ledgerAccountId: interestReceivable.id, type: "Credit", amount: interestToPay },
+              { journalEntryId: journalEntry.id, ledgerAccountId: interestReceived.id, type: "Debit", amount: interestToPay },
+              { journalEntryId: journalEntry.id, ledgerAccountId: interestIncome.id, type: "Credit", amount: interestToPay },
+            );
+            amountToApply -= interestToPay;
+          }
+
+          // Tax
+          const taxDue = Math.max(0, totals.tax - alreadyPaidTax);
+          const taxToPay = Math.min(amountToApply, taxDue);
+          if (taxToPay > 0) {
+            await tx.ledgerAccount.update({ where: { id: taxReceivable.id }, data: { balance: { decrement: taxToPay } } });
+            await tx.ledgerAccount.update({ where: { id: taxReceived.id }, data: { balance: { increment: taxToPay } } });
+            ledgerEntryCreates.push(
+              { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivable.id, type: "Credit", amount: taxToPay },
+              { journalEntryId: journalEntry.id, ledgerAccountId: taxReceived.id, type: "Debit", amount: taxToPay },
+            );
+            amountToApply -= taxToPay;
+          }
+
+          // Principal
+          const principalDue = Math.max(0, totals.principal - alreadyPaidPrincipal);
+          const principalToPay = Math.min(amountToApply, principalDue);
+          if (principalToPay > 0) {
+            await tx.ledgerAccount.update({ where: { id: principalReceivable.id }, data: { balance: { decrement: principalToPay } } });
+            await tx.ledgerAccount.update({ where: { id: principalReceived.id }, data: { balance: { increment: principalToPay } } });
+            ledgerEntryCreates.push(
+              { journalEntryId: journalEntry.id, ledgerAccountId: principalReceivable.id, type: "Credit", amount: principalToPay },
+              { journalEntryId: journalEntry.id, ledgerAccountId: principalReceived.id, type: "Debit", amount: principalToPay },
+            );
+          }
+
+          if (ledgerEntryCreates.length > 0) {
+            await tx.ledgerEntry.createMany({ data: ledgerEntryCreates });
+          }
+
+          // Create payment record
+          await tx.payment.create({
+            data: {
+              loanId,
+              amount: paymentAmount,
+              date: paymentDate,
+              outstandingBalanceBeforePayment: totalDue,
+              journalEntryId: journalEntry.id,
+            },
+          });
+
+          const newRepaidAmount = alreadyRepaid + paymentAmount;
+          const isFullyPaid = newRepaidAmount >= totals.total;
+          let repaymentBehavior: RepaymentBehavior | null = null;
+
+          if (isFullyPaid) {
+            const today = startOfDay(new Date());
+            const dueDate = startOfDay(loan.dueDate);
+            if (isBefore(today, dueDate)) repaymentBehavior = "EARLY";
+            else if (isEqual(today, dueDate)) repaymentBehavior = "ON_TIME";
+            else repaymentBehavior = "LATE";
+          }
+
+          await tx.loan.update({
+            where: { id: loanId },
+            data: {
+              repaidAmount: newRepaidAmount,
+              repaymentStatus: isFullyPaid ? "Paid" : "Unpaid",
+              ...(repaymentBehavior && { repaymentBehavior }),
+            },
+          });
+
+          // Mark pending payment as completed
+          await tx.pendingPayment.update({
+            where: { id: String(pendingPaymentId) },
+            data: { status: "COMPLETED" },
+          });
+        });
+
+        // Create/update PaymentTransaction so reports can resolve the CBS reference
+        const existingPt = txnRef
+          ? await prisma.paymentTransaction.findFirst({
+              where: { txnRef: String(txnRef) } as any,
+            })
+          : null;
+
+        if (existingPt) {
+          await prisma.paymentTransaction.update({
+            where: { id: existingPt.id },
+            data: {
+              transactionId: cbsTransactionId,
+              status: "PROCESSED",
+            } as any,
+          });
+        } else {
+          await prisma.paymentTransaction.create({
+            data: {
+              transactionId: cbsTransactionId,
+              txnRef: txnRef || pendingPaymentId,
+              paymentType: "BNPL",
+              status: "PROCESSED",
+              payload: JSON.stringify({
+                source: "manual_mark_successful",
+                pendingPaymentId,
+                cbsTransactionId,
+                loanId,
+                amount: paymentAmount,
+              }),
+            } as any,
+          });
+        }
+
+        await createAuditLog({
+          actorId: actorId || "N/A",
+          action: "PAYMENT_MARKED_SUCCESSFUL",
+          entity: "PendingPayment",
+          entityId: String(pendingPaymentId),
+          details: {
+            pendingPaymentId,
+            cbsTransactionId,
+            loanId,
+            borrowerId,
+            amount: paymentAmount,
+          },
+          ipAddress,
+          userAgent,
+        });
+      }
+      break;
+
     default:
       throw new Error(`Unknown entity type for approval: ${entityType}`);
   }
@@ -1646,7 +1946,7 @@ async function applyChange(
 
 export async function POST(req: NextRequest) {
   const user = await getUserFromSession();
-  if (!user || (!user.permissions?.["approvals"]?.update && !user.permissions?.["reversal-approval"]?.update && !user.permissions?.["merchants-approvals"]?.update)) {
+  if (!user || (!user.permissions?.["approvals"]?.update && !user.permissions?.["reversal-approval"]?.update && !user.permissions?.["merchants-approvals"]?.update && !user.permissions?.["pending-payment-approvals"]?.update)) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 

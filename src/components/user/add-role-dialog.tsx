@@ -37,7 +37,7 @@ interface AddRoleDialogProps {
 
 const PERMISSION_MODULES: (keyof Permissions)[] = allMenuItems
   .map(
-    (item) => item.label.toLowerCase().replace(/\s+/g, "-") as keyof Permissions
+    (item) => (item.permissionKey || item.label.toLowerCase().replace(/\s+/g, "-")) as keyof Permissions
   )
   .concat(["providers", "products"]);
 const PERMISSION_ACTIONS: (keyof Permissions[keyof Permissions])[] = [

@@ -433,6 +433,14 @@ export async function GET(request: NextRequest) {
               }
             }
 
+            // Also check for inline FT: reference in description (manual mark-successful)
+            if (reference === je.id) {
+              const ftMatch = desc.match(/FT:([A-Za-z0-9]+)/i);
+              if (ftMatch && ftMatch[1]) {
+                reference = ftMatch[1];
+              }
+            }
+
             // 2) If still default, try to match by payment date and amount via PendingPayment
             if (reference === je.id && je.payment) {
               const paymentDate = new Date(je.payment.date);
@@ -588,6 +596,12 @@ export async function GET(request: NextRequest) {
               transactionStatus = "PENDING";
             }
           }
+        }
+
+        // For repayment entries, use the payment FT reference as cbsReference
+        // so it takes priority in the CBS Reference column display
+        if (je.payment && reference !== je.id) {
+          cbsReference = reference;
         }
 
         return {

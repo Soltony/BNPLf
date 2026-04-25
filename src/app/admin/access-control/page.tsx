@@ -20,7 +20,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { allMenuItems } from '@/lib/menu-items';
 
 
-const PERMISSION_MODULES = allMenuItems.map(item => item.label.toLowerCase().replace(/\s+/g, '-')).concat(['products']);
+const PERMISSION_MODULES = allMenuItems.map(item => item.permissionKey || item.label.toLowerCase().replace(/\s+/g, '-')).concat(['products']);
 
 
 function UsersTab() {
