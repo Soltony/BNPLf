@@ -210,6 +210,7 @@ export async function GET(req: NextRequest) {
       providerId: loan.product?.provider?.id || null,
       originalProviderId: loan.product?.provider?.id || null,
       creditAccount: accountByBorrower.get(loan.borrowerId) || null,
+      borrowerAccountNumber: accountByBorrower.get(loan.borrowerId) || null,
       amount: loan.loanAmount,
       statusCode: null,
       createdAt: loan.createdAt.toISOString(),
@@ -362,11 +363,20 @@ export async function GET(req: NextRequest) {
   const phoneMaps = creditAccounts.length
     ? await prisma.phoneAccount.findMany({
         where: { accountNumber: { in: creditAccounts } },
-        select: { accountNumber: true, phoneNumber: true },
+        select: { accountNumber: true, phoneNumber: true, isActive: true, createdAt: true },
+        orderBy: [{ isActive: "desc" }, { createdAt: "desc" }],
       })
     : [];
   const phoneByAccount = new Map<string, string>();
-  for (const p of phoneMaps) phoneByAccount.set(p.accountNumber, p.phoneNumber);
+  const accountByPhone = new Map<string, string>();
+  
+  for (const p of phoneMaps) {
+    phoneByAccount.set(p.accountNumber, p.phoneNumber);
+    // Only set the first (best) account per borrower
+    if (!accountByPhone.has(p.phoneNumber)) {
+      accountByPhone.set(p.phoneNumber, p.accountNumber);
+    }
+  }
 
   const rows = await Promise.all(
     txs.map(async (t) => {
@@ -399,6 +409,7 @@ export async function GET(req: NextRequest) {
         providerId: t.providerId,
         originalProviderId: t.originalProviderId,
         creditAccount: t.creditAccount,
+        borrowerAccountNumber: borrowerId ? accountByPhone.get(borrowerId) || null : null,
         amount: t.amount,
         statusCode: t.statusCode,
         createdAt: t.createdAt.toISOString(),

@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
   const cbsTransactionId = body?.transactionId
     ? String(body.transactionId).trim()
     : null;
+  const globalTax = body?.globalTax || null;
 
   // Handle "Posted" loans - loans with no disbursement transaction record
   if (isPosted && loanId) {
@@ -118,6 +119,7 @@ export async function POST(req: NextRequest) {
         amount: loan.loanAmount,
         createdAt: loan.createdAt?.toISOString?.() ?? null,
         isPosted: true,
+        globalTax: globalTax,
       },
     });
 
@@ -317,6 +319,7 @@ export async function POST(req: NextRequest) {
       amount: tx.amount,
       loanId: (tx as any).loanId ?? null,
       createdAt: tx.createdAt?.toISOString?.() ?? null,
+      globalTax: globalTax,
     },
   });
 

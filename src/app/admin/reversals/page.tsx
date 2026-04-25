@@ -47,6 +47,7 @@ type ReversalRow = {
   providerId: string;
   originalProviderId: string | null;
   creditAccount: string | null;
+  borrowerAccountNumber: string | null;
   amount: number | null;
   statusCode: number | null;
   createdAt: string;
@@ -88,6 +89,7 @@ export default function ReversalsPage() {
   const [cancellingRow, setCancellingRow] = useState<ReversalRow | null>(null);
   const [cancelTransactionId, setCancelTransactionId] = useState("");
   const [isCancelling, setIsCancelling] = useState(false);
+  const [globalTax, setGlobalTax] = useState<{ rate: number; name: string } | null>(null);
 
   // Debounce search input
   useEffect(() => {
@@ -97,6 +99,28 @@ export default function ReversalsPage() {
     }, 300);
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  // Load global tax configuration
+  useEffect(() => {
+    const fetchGlobalTax = async () => {
+      try {
+        const res = await fetch("/api/tax");
+        if (!res.ok) return;
+        const data = await res.json();
+        // Find an inclusive tax that applies globally
+        const inclusiveTax = Array.isArray(data) 
+          ? data.find((t: any) => t.isInclusive && t.status === "ACTIVE")
+          : data.taxes?.find((t: any) => t.isInclusive && t.status === "ACTIVE");
+        if (inclusiveTax) {
+          setGlobalTax({ rate: inclusiveTax.rate, name: inclusiveTax.name });
+        }
+      } catch (e) {
+        // Silently fail for tax loading
+        console.error("Failed to load tax configuration:", e);
+      }
+    };
+    void fetchGlobalTax();
+  }, []);
 
   const query = useMemo(() => {
     const p = new URLSearchParams();
@@ -197,10 +221,12 @@ export default function ReversalsPage() {
                 loanId: cancellingRow.loanId,
                 isPosted: true,
                 transactionId: cancelTransactionId.trim(),
+                globalTax: globalTax,
               }
             : {
                 id: cancellingRow.id,
                 transactionId: cancelTransactionId.trim(),
+                globalTax: globalTax,
               }
         ),
       });
@@ -350,6 +376,7 @@ export default function ReversalsPage() {
                 <TableHead>Date</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Provider</TableHead>
+                <TableHead>Borrower Account</TableHead>
                 <TableHead>Credit Account</TableHead>
                 <TableHead>Amount</TableHead>
                 <TableHead>Txn ID</TableHead>
@@ -360,7 +387,7 @@ export default function ReversalsPage() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center">
+                  <TableCell colSpan={9} className="h-24 text-center">
                     <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                   </TableCell>
                 </TableRow>
@@ -387,6 +414,9 @@ export default function ReversalsPage() {
                         {internalProviderId}
                       </TableCell>
                       <TableCell className="font-mono">
+                        {r.borrowerAccountNumber || "—"}
+                      </TableCell>
+                      <TableCell className="font-mono">
                         {r.creditAccount || "—"}
                       </TableCell>
                       <TableCell>{r.amount ?? "—"}</TableCell>
@@ -400,7 +430,7 @@ export default function ReversalsPage() {
                         <div className="flex justify-end gap-2">
                           <Button
                             variant="outline"
-                            disabled={!canReverse || reversingId === r.id}
+                            disabled={true}
                             onClick={() => void reverseTx(r)}
                           >
                             {reversingId === r.id ? (
@@ -417,7 +447,7 @@ export default function ReversalsPage() {
                             disabled={!canReverse}
                             onClick={() => openCancelDialog(r)}
                           >
-                            Cancel
+                            Mark successful
                           </Button>
                         </div>
                       </TableCell>
@@ -426,7 +456,7 @@ export default function ReversalsPage() {
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="h-24 text-center">
+                  <TableCell colSpan={9} className="h-24 text-center">
                     {filterMode === "posted" 
                       ? "No posted loans without disbursement records found."
                       : filterMode === "all"
@@ -479,12 +509,20 @@ export default function ReversalsPage() {
           {cancellingRow && (
             <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="text-muted-foreground">Borrower Account:</div>
+                <div className="font-mono">{cancellingRow.borrowerAccountNumber || "—"}</div>
                 <div className="text-muted-foreground">Credit Account:</div>
-                <div className="font-mono">{cancellingRow.creditAccount}</div>
+                <div className="font-mono">{cancellingRow.creditAccount || "—"}</div>
                 <div className="text-muted-foreground">Amount:</div>
                 <div>{cancellingRow.amount ?? "—"}</div>
                 <div className="text-muted-foreground">Loan ID:</div>
                 <div className="font-mono">{cancellingRow.loanId ?? "—"}</div>
+                {globalTax && (
+                  <>
+                    <div className="text-muted-foreground">Tax Rate ({globalTax.name}):</div>
+                    <div className="text-blue-600 font-semibold">{globalTax.rate}%</div>
+                  </>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="transactionId">CBS Transaction ID</Label>
