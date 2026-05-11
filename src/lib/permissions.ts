@@ -9,7 +9,7 @@ function pascalOrCamelToKebab(name: string) {
   return name.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 }
 
-const MODULE_KEYS = allMenuItems.map((i) => i.label.toLowerCase().replace(/\s+/g, '-'));
+const MODULE_KEYS = allMenuItems.map((i) => i.permissionKey || i.label.toLowerCase().replace(/\s+/g, '-'));
 
 // Explicit map from entity types to the module permission keys exposed in the UI.
 const ENTITY_TO_MODULE: Record<string, string[]> = {
@@ -23,6 +23,7 @@ const ENTITY_TO_MODULE: Record<string, string[]> = {
   disbursementcancel: ['approvals', 'reversal-approval'],
   loanreversal: ['reversals', 'reversal-approval'],
   loancancel: ['reversals', 'reversal-approval'],
+  paymentmarksuccessful: ['pending-payments', 'pending-payment-approvals'],
   eligibilitylist: ['settings'],
   dataprovisioningupload: ['settings', 'scoring-engine'],
   termsandconditions: ['settings'],

@@ -20,6 +20,7 @@ import {
   ReceiptText,
   MapPin,
   ChevronRight,
+  CreditCard,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -69,6 +70,19 @@ export const allMenuItems: MenuItem[] = [
     label: 'Reversal Approval',
     icon: CheckSquare,
     roles: ['Super Admin', 'Loan Manager'],
+  },
+  {
+    path: '/admin/pending-payments',
+    label: 'Pending Payments',
+    icon: CreditCard,
+    roles: ['Super Admin', 'Loan Manager'],
+  },
+  {
+    path: '/admin/pending-payment-approvals',
+    label: 'Payment Approvals',
+    icon: CheckSquare,
+    roles: ['Super Admin', 'Loan Manager'],
+    permissionKey: 'pending-payment-approvals',
   },
   {
     path: '/admin/npl',
