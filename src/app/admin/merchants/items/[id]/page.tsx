@@ -37,6 +37,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
   const [sellingOption, setSellingOption] = useState('BNPL_ONLY');
   const [imageUrl, setImageUrl] = useState('');
   const [videoUrl, setVideoUrl] = useState('');
+  const [requiresMerchantAvailabilityConfirmation, setRequiresMerchantAvailabilityConfirmation] = useState(false);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
 
@@ -54,7 +55,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
     Promise.all([
       fetch('/api/merchants').then(r => r.json()),
       fetch('/api/merchants/categories').then(r => r.json()),
-      fetch(`/api/shop/${id}`).then(r => r.json()),
+      fetch(`/api/merchants/items?id=${id}`).then(r => r.json()),
       fetch('/api/branches/locations').then(r => r.json()),
       fetch(`/api/inventory?itemId=${id}`).then(r => r.json()),
     ]).then(([m, c, item, locs, inventory]) => {
@@ -70,6 +71,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
         setPrice(String(item.price || ''));
         setStatus(item.status || 'ACTIVE');
         setSellingOption(item.sellingOption || 'BNPL_ONLY');
+        setRequiresMerchantAvailabilityConfirmation(!!item.requiresMerchantAvailabilityConfirmation);
         // Force DIRECT_ONLY if the merchant does not have BNPL enabled
         const itemMerchant = (Array.isArray(m) ? m : []).find((x: any) => String(x.id) === String(item.merchantId));
         if (itemMerchant && !itemMerchant.bnplEnabled) {
@@ -250,6 +252,7 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
           videoUrl: videoUrl || null,
           status,
           sellingOption,
+          requiresMerchantAvailabilityConfirmation,
           optionGroups: optionGroups.length > 0 ? optionGroups : [],
         }),
       });
@@ -378,6 +381,21 @@ export default function EditItemPage({ params }: { params: Promise<{ id: string 
             <div>
               <Label>Product video URL</Label>
               <Input value={videoUrl} onChange={e => setVideoUrl(e.target.value)} placeholder="https://youtube.com/..." />
+            </div>
+            <div className="flex items-center space-x-2 pt-8">
+              <Checkbox 
+                id="requiresConfirmation" 
+                checked={requiresMerchantAvailabilityConfirmation} 
+                onCheckedChange={(checked) => setRequiresMerchantAvailabilityConfirmation(!!checked)} 
+              />
+              <div className="grid gap-1.5 leading-none">
+                <Label htmlFor="requiresConfirmation" className="text-sm font-medium leading-none cursor-pointer">
+                  Require merchant availability confirmation
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  If enabled, the merchant must confirm the item is in stock before the order proceeds.
+                </p>
+              </div>
             </div>
           </div>
 

@@ -4,6 +4,8 @@ import { calculateTotalRepayable, calculateInclusiveTax } from '@/lib/loan-calcu
 import { addDays } from 'date-fns';
 import { getDiscountEffectiveAmount, isDiscountActive, pickBestDiscount } from '@/lib/discount-utils';
 import { areDisbursementsEnabled } from '@/lib/disbursement-control';
+import { validateBorrowerEligibility } from '@/actions/borrower-validation';
+import { getUserFromSession } from '@/lib/user';
 
 export async function GET(req: NextRequest) {
   try {
@@ -68,31 +70,50 @@ export async function PUT(req: NextRequest) {
       }
     }
 
-    const updateData: any = { status };
-    if (status === 'CANCELLED') {
-      updateData.cancelReason = cancelReason || 'Cancelled by borrower';
-      updateData.cancelledBy = 'BORROWER';
-    }
+    // Only perform the simple update if NOT confirming delivery.
+    // Delivery confirmation handles its own updates within a transaction.
+    let updated: any = null;
+    if (status !== 'DELIVERED') {
+      const updateData: any = { status };
+      if (status === 'CANCELLED') {
+        updateData.cancelReason = cancelReason || 'Cancelled by borrower';
+        updateData.cancelledBy = 'BORROWER';
+      }
 
-    const updated = await prisma.order.update({
-      where: { id },
-      data: updateData,
-      include: {
-        merchant: { select: { id: true, name: true, contactPersonName: true, contactPersonPhone: true, contactPersonEmail: true, additionalContactInfo: true } },
-        orderItems: { include: { item: { select: { id: true, name: true } } } },
-      },
-    });
+      updated = await prisma.order.update({
+        where: { id },
+        data: updateData,
+        include: {
+          merchant: { select: { id: true, name: true, contactPersonName: true, contactPersonPhone: true, contactPersonEmail: true, additionalContactInfo: true } },
+          orderItems: { include: { item: { select: { id: true, name: true } } } },
+        },
+      });
 
-    // If cancelling, also cancel the linked loan application
-    if (status === 'CANCELLED' && order.loanApplicationId) {
-      await prisma.loanApplication.update({
-        where: { id: order.loanApplicationId },
-        data: { status: 'CANCELLED' },
-      }).catch(() => {});
+      // If cancelling, also cancel the linked loan application
+      if (status === 'CANCELLED' && order.loanApplicationId) {
+        await prisma.loanApplication.update({
+          where: { id: order.loanApplicationId },
+          data: { status: 'CANCELLED' },
+        }).catch(() => {});
+      }
     }
 
     // ── When delivery is confirmed, CREATE the full loan + accounting + disbursement ──
     if (status === 'DELIVERED' && order.loanApplicationId) {
+      // Enforce eligibility check before disbursement
+      const eligibility = await validateBorrowerEligibility(order.borrowerId, undefined, {
+        excludeOrderId: order.id,
+        excludeLoanId: order.loanId || undefined,
+        includePending: false // Allow completion even if other orders are still PENDING_MERCHANT_CONFIRMATION
+      });
+      if (!eligibility.isEligible) {
+        console.error(`Disbursement blocked for borrower ${order.borrowerId}: ${eligibility.reason}`);
+        return NextResponse.json({ 
+          error: `Disbursement blocked: ${eligibility.reason}`,
+          details: eligibility.activeFinancing 
+        }, { status: 403 });
+      }
+
       try {
         const loanApp = await prisma.loanApplication.findUnique({
           where: { id: order.loanApplicationId },
@@ -161,116 +182,133 @@ export async function PUT(req: NextRequest) {
           return NextResponse.json(updated);
         }
 
-        // ── Create the Loan record ──
-        const createdLoan = await prisma.loan.create({
-          data: {
-            borrowerId: loanApp.borrowerId,
-            productId: loanApp.productId,
-            loanApplicationId: loanApp.id,
-            loanAmount,
-            disbursedDate,
-            dueDate,
-            serviceFee: calculatedServiceFee,
-            penaltyAmount: 0,
-            repaymentStatus: 'Unpaid',
-            repaidAmount: 0,
-            taxDeducted: inclusiveTaxAmount,
-            netDisbursedAmount: netDisbursedAmount,
-          },
-        });
+        // ── Transactional block for Loan creation, Accounting, and Disbursement Setup ──
+        const { createdLoan, disbursement, creditAccount } = await prisma.$transaction(async (tx) => {
+          // 1. Re-verify order status inside transaction to prevent race conditions
+          const currentOrder = await tx.order.findUnique({ 
+            where: { id: order.id },
+            select: { status: true }
+          });
+          
+          if (currentOrder?.status === 'DELIVERED') {
+            throw new Error('Order is already processed');
+          }
 
-        // Link the loan to the order
-        await prisma.order.update({
-          where: { id: order.id },
-          data: { loanId: createdLoan.id },
-        });
+          // 2. Create the Loan record
+          const loan = await tx.loan.create({
+            data: {
+              borrowerId: loanApp.borrowerId,
+              productId: loanApp.productId,
+              loanApplicationId: loanApp.id,
+              loanAmount,
+              disbursedDate,
+              dueDate,
+              serviceFee: calculatedServiceFee,
+              penaltyAmount: 0,
+              repaymentStatus: 'Unpaid',
+              repaidAmount: 0,
+              taxDeducted: inclusiveTaxAmount,
+              netDisbursedAmount: netDisbursedAmount,
+            },
+          });
 
-        // ── Journal & Ledger Entries ──
-        const journalEntry = await prisma.journalEntry.create({
-          data: {
-            providerId: provider.id,
-            loanId: createdLoan.id,
-            date: disbursedDate,
-            description: `BNPL disbursement for ${product.name} to borrower ${loanApp.borrowerId}`,
-          },
-        });
+          // 3. Link the loan to the order and update status
+          await tx.order.update({
+            where: { id: order.id },
+            data: { loanId: loan.id, status: 'DELIVERED' },
+          });
 
-        // Principal
-        await prisma.ledgerEntry.createMany({
-          data: [{
-            journalEntryId: journalEntry.id,
-            ledgerAccountId: principalReceivableAccount.id,
-            type: 'Debit',
-            amount: loanAmount,
-          }],
-        });
-        await prisma.ledgerAccount.update({
-          where: { id: principalReceivableAccount.id },
-          data: { balance: { increment: loanAmount } },
-        });
+          // 4. Update LoanApplication status
+          await tx.loanApplication.update({
+            where: { id: loanApp.id },
+            data: { status: 'DISBURSED' },
+          });
 
-        // Service Fee
-        if (calculatedServiceFee > 0 && serviceFeeReceivableAccount) {
-          await prisma.ledgerEntry.createMany({
+          // 5. Journal & Ledger Entries
+          const journalEntry = await tx.journalEntry.create({
+            data: {
+              providerId: provider.id,
+              loanId: loan.id,
+              date: disbursedDate,
+              description: `BNPL disbursement for ${product.name} to borrower ${loanApp.borrowerId}`,
+            },
+          });
+
+          // Principal
+          await tx.ledgerEntry.createMany({
             data: [{
               journalEntryId: journalEntry.id,
-              ledgerAccountId: serviceFeeReceivableAccount.id,
+              ledgerAccountId: principalReceivableAccount.id,
               type: 'Debit',
-              amount: calculatedServiceFee,
+              amount: loanAmount,
             }],
           });
-          await prisma.ledgerAccount.update({
-            where: { id: serviceFeeReceivableAccount.id },
-            data: { balance: { increment: calculatedServiceFee } },
+          await tx.ledgerAccount.update({
+            where: { id: principalReceivableAccount.id },
+            data: { balance: { increment: loanAmount } },
           });
-        }
 
-        // Tax
-        if (calculatedTax > 0.000001 && taxReceivableAccount) {
-          await prisma.ledgerEntry.createMany({
-            data: [{
-              journalEntryId: journalEntry.id,
-              ledgerAccountId: taxReceivableAccount.id,
-              type: 'Debit',
-              amount: calculatedTax,
-            }],
-          });
-          await prisma.ledgerAccount.update({
-            where: { id: taxReceivableAccount.id },
-            data: { balance: { increment: calculatedTax } },
-          });
-        }
-
-        // Inclusive tax: record upfront deduction
-        if (inclusiveTaxAmount > 0 && taxReceivableAccount) {
-          const taxReceivedAccount = provider.ledgerAccounts.find(
-            (acc: any) => acc.category === 'Tax' && acc.type === 'Received'
-          );
-          await prisma.ledgerEntry.createMany({
-            data: [
-              { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivableAccount.id, type: 'Debit', amount: inclusiveTaxAmount },
-              { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivableAccount.id, type: 'Credit', amount: inclusiveTaxAmount },
-            ],
-          });
-          if (taxReceivedAccount) {
-            await prisma.ledgerAccount.update({
-              where: { id: taxReceivedAccount.id },
-              data: { balance: { increment: inclusiveTaxAmount } },
+          // Service Fee
+          if (calculatedServiceFee > 0 && serviceFeeReceivableAccount) {
+            await tx.ledgerEntry.createMany({
+              data: [{
+                journalEntryId: journalEntry.id,
+                ledgerAccountId: serviceFeeReceivableAccount.id,
+                type: 'Debit',
+                amount: calculatedServiceFee,
+              }],
             });
-            await prisma.ledgerEntry.create({
-              data: { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivedAccount.id, type: 'Debit', amount: inclusiveTaxAmount },
+            await tx.ledgerAccount.update({
+              where: { id: serviceFeeReceivableAccount.id },
+              data: { balance: { increment: calculatedServiceFee } },
             });
           }
-        }
 
-        // Deduct provider balance (net of inclusive tax)
-        await prisma.loanProvider.update({
-          where: { id: provider.id },
-          data: { initialBalance: { decrement: netDisbursedAmount } },
-        });
+          // Tax
+          if (calculatedTax > 0.000001 && taxReceivableAccount) {
+            await tx.ledgerEntry.createMany({
+              data: [{
+                journalEntryId: journalEntry.id,
+                ledgerAccountId: taxReceivableAccount.id,
+                type: 'Debit',
+                amount: calculatedTax,
+              }],
+            });
+            await tx.ledgerAccount.update({
+              where: { id: taxReceivableAccount.id },
+              data: { balance: { increment: calculatedTax } },
+            });
+          }
 
-        // ── Create installment schedule ──
-        try {
+          // Inclusive tax: record upfront deduction
+          if (inclusiveTaxAmount > 0 && taxReceivableAccount) {
+            const taxReceivedAccount = provider.ledgerAccounts.find(
+              (acc: any) => acc.category === 'Tax' && acc.type === 'Received'
+            );
+            await tx.ledgerEntry.createMany({
+              data: [
+                { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivableAccount.id, type: 'Debit', amount: inclusiveTaxAmount },
+                { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivableAccount.id, type: 'Credit', amount: inclusiveTaxAmount },
+              ],
+            });
+            if (taxReceivedAccount) {
+              await tx.ledgerAccount.update({
+                where: { id: taxReceivedAccount.id },
+                data: { balance: { increment: inclusiveTaxAmount } },
+              });
+              await tx.ledgerEntry.create({
+                data: { journalEntryId: journalEntry.id, ledgerAccountId: taxReceivedAccount.id, type: 'Debit', amount: inclusiveTaxAmount },
+              });
+            }
+          }
+
+          // 6. Deduct provider balance (net of inclusive tax)
+          await tx.loanProvider.update({
+            where: { id: provider.id },
+            data: { initialBalance: { decrement: netDisbursedAmount } },
+          });
+
+          // 7. Create installment schedule
           const installmentsCount = product.installments || null;
           const repaymentIntervalDays = (product as any).repaymentIntervalDays ?? null;
           if (installmentsCount && installmentsCount > 0) {
@@ -283,9 +321,9 @@ export async function PUT(req: NextRequest) {
               const isLast = i === installmentsCount;
               const amount = isLast ? remaining : round2(Math.floor((loanAmount / installmentsCount) * 100) / 100);
               const due = addDays(disbursedDate, interval * i);
-              await prisma.loanInstallment.create({
+              await tx.loanInstallment.create({
                 data: {
-                  loanId: createdLoan.id,
+                  loanId: loan.id,
                   installmentNumber: i,
                   dueDate: due,
                   amount,
@@ -295,49 +333,52 @@ export async function PUT(req: NextRequest) {
               remaining = round2(remaining - amount);
             }
           }
-        } catch (e) {
-          console.error('Failed to create installments for BNPL loan:', e);
-        }
 
-        // ── Update LoanApplication status ──
-        await prisma.loanApplication.update({
-          where: { id: loanApp.id },
-          data: { status: 'DISBURSED' },
-        });
-
-        // ── Disbursement to Merchant Account ──
-        const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? 'PRO0002';
-
-        // Credit the merchant's account (not the borrower's)
-        const merchant = await prisma.merchant.findUnique({
-          where: { id: order.merchantId },
-          select: { accountNumber: true, name: true },
-        });
-        const creditAccount = merchant?.accountNumber || '';
-
-        if (!creditAccount) {
-          console.error(`Merchant ${order.merchantId} has no account number for BNPL disbursement`);
-        }
-
-        if (creditAccount) {
-          const disbursement = await prisma.disbursementTransaction.create({
-            data: {
-              loanId: createdLoan.id,
-              providerId: forcedProviderId,
-              originalProviderId: provider.id,
-              creditAccount,
-              amount: netDisbursedAmount,
-              disbursementStatus: 'PENDING',
-              requestPayload: JSON.stringify({
-                creditAccount,
-                providerId: forcedProviderId,
-                amount: netDisbursedAmount,
-                loanId: createdLoan.id,
-                merchantId: order.merchantId,
-              }),
-            } as any,
+          // 8. Disbursement to Merchant Account setup
+          const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? 'PRO0002';
+          const merchant = await tx.merchant.findUnique({
+            where: { id: order.merchantId },
+            select: { accountNumber: true, name: true },
           });
+          const creditAccount = merchant?.accountNumber || '';
 
+          let disbursement = null;
+          if (creditAccount) {
+            disbursement = await tx.disbursementTransaction.create({
+              data: {
+                loanId: loan.id,
+                providerId: forcedProviderId,
+                originalProviderId: provider.id,
+                creditAccount,
+                amount: netDisbursedAmount,
+                disbursementStatus: 'PENDING',
+                requestPayload: JSON.stringify({
+                  creditAccount,
+                  providerId: forcedProviderId,
+                  amount: netDisbursedAmount,
+                  loanId: loan.id,
+                  merchantId: order.merchantId,
+                }),
+              } as any,
+            });
+          }
+
+          return { createdLoan: loan, disbursement, creditAccount };
+        });
+
+        // Re-fetch the updated order to return it
+        updated = await prisma.order.findUnique({
+          where: { id: order.id },
+          include: {
+            merchant: { select: { id: true, name: true, contactPersonName: true, contactPersonPhone: true, contactPersonEmail: true, additionalContactInfo: true } },
+            orderItems: { include: { item: { select: { id: true, name: true } } } },
+          },
+        });
+
+        // ── External Disbursement (Outside transaction) ──
+        if (disbursement && creditAccount) {
+          const forcedProviderId = process.env.FORCE_PROVIDER_ID ?? 'PRO0002';
+          
           // Call CBS directly instead of self-fetching /api/external/disbursement
           const cbsEnabled = await areDisbursementsEnabled();
           if (!cbsEnabled) {
@@ -477,6 +518,18 @@ export async function POST(req: NextRequest) {
       create: { id: borrowerId },
     });
 
+    // Enforce eligibility check before creating BNPL order
+    if (!isDirectPayment) {
+      const user = await getUserFromSession();
+      const eligibility = await validateBorrowerEligibility(borrowerId, user?.id);
+      if (!eligibility.isEligible) {
+        return NextResponse.json({ 
+          error: eligibility.reason,
+          details: eligibility.activeFinancing 
+        }, { status: 403 });
+      }
+    }
+
     // ── Create a LoanApplication with PENDING_DELIVERY status (BNPL only) ──
     // No loan is created yet — that happens on delivery confirmation.
     let loanApplication: any = null;
@@ -491,6 +544,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    let requiresConfirmation = false;
     let totalAmount = 0;
     const orderItemsData: any[] = [];
     const orderItemScopes: Array<{ merchantId: string | null; categoryId: string | null }> = [];
@@ -503,6 +557,11 @@ export async function POST(req: NextRequest) {
 
       if (!item || item.status !== 'ACTIVE') {
         return NextResponse.json({ error: `Item ${orderItem.itemId} not found or inactive` }, { status: 400 });
+      }
+
+      // Check if ANY item in the order requires merchant confirmation
+      if (item.requiresMerchantAvailabilityConfirmation) {
+        requiresConfirmation = true;
       }
 
       let unitPrice = item.price;
@@ -576,7 +635,7 @@ export async function POST(req: NextRequest) {
         loanApplicationId: loanApplication?.id || null,
         totalAmount: Math.max(0, totalAmount),
         paymentType: isDirectPayment ? 'DIRECT' : 'BNPL',
-        status: 'PENDING_MERCHANT_CONFIRMATION',
+        status: requiresConfirmation ? 'PENDING_MERCHANT_CONFIRMATION' : 'ON_DELIVERY',
         orderItems: { create: orderItemsData },
       },
       include: {

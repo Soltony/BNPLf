@@ -76,7 +76,7 @@ interface ProductCardProps {
     activeLoan?: LoanDetails;
     onApply: () => void;
     onRepay: (loan: LoanDetails, balanceDue: number) => void;
-    IconDisplayComponent: React.ComponentType<{ iconName: string, className?: string }>;
+    IconDisplayComponent: React.ComponentType<{ iconName: string, className?: string, style?: React.CSSProperties }>;
     isEligible: boolean;
     eligibilityReason: string;
     availableToBorrow: number;
@@ -273,19 +273,15 @@ export function ProductCard({
                             </p>
                         </div>
                     </div>
-                     {!isEligible ? (
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <span tabIndex={0}>{applyButton}</span>
-                                </TooltipTrigger>
-                                <TooltipContent>
-                                    <p>{eligibilityReason}</p>
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    ) : (
+                    {isEligible ? (
                         applyButton
+                    ) : (
+                        <div className="flex flex-col items-end gap-1">
+                            {applyButton}
+                            <p className="text-[10px] text-red-500 max-w-[150px] text-right leading-tight">
+                                {eligibilityReason}
+                            </p>
+                        </div>
                     )}
                 </div>
                  <div className="flex justify-end mt-2">

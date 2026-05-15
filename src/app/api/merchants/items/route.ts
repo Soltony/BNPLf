@@ -26,7 +26,23 @@ export async function GET(req: NextRequest) {
 
   try {
     const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
     const merchantId = searchParams.get('merchantId');
+    
+    if (id) {
+      const item = await prisma.item.findUnique({
+        where: { id },
+        include: { merchant: true, category: true, variants: true, optionGroups: { include: { values: true } } },
+      });
+      if (!item) return NextResponse.json({ error: 'Item not found' }, { status: 404 });
+      
+      // If user is a merchant user, scope to their merchant
+      if (user.merchantId && item.merchantId !== user.merchantId) {
+        return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
+      }
+      return NextResponse.json(item);
+    }
+
     const where: any = {};
     if (merchantId) where.merchantId = merchantId;
     // If user is a merchant user, scope to their merchant
@@ -52,7 +68,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    let { merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, variants, optionGroups } = body;
+    let { merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, requiresMerchantAvailabilityConfirmation, variants, optionGroups } = body;
 
     // Merchant users can only create items for their own merchant
     if (user.merchantId) merchantId = user.merchantId;
@@ -80,6 +96,7 @@ export async function POST(req: NextRequest) {
             videoUrl: videoUrl || null,
             status: status || 'ACTIVE',
             sellingOption: sellingOption || 'BNPL_ONLY',
+            requiresMerchantAvailabilityConfirmation: !!requiresMerchantAvailabilityConfirmation,
             variants: variants || [],
             optionGroups: optionGroups || [],
           },
@@ -104,7 +121,7 @@ export async function PUT(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { id, merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, variants, optionGroups } = body;
+    const { id, merchantId, categoryId, name, description, price, imageUrl, videoUrl, status, sellingOption, requiresMerchantAvailabilityConfirmation, variants, optionGroups } = body;
     if (!id) return NextResponse.json({ error: 'ID is required' }, { status: 400 });
 
     const existing = await prisma.item.findUnique({
@@ -141,6 +158,7 @@ export async function PUT(req: NextRequest) {
             videoUrl: videoUrl ?? existing.videoUrl,
             status: status || existing.status,
             sellingOption: sellingOption || existing.sellingOption,
+            requiresMerchantAvailabilityConfirmation: requiresMerchantAvailabilityConfirmation !== undefined ? !!requiresMerchantAvailabilityConfirmation : existing.requiresMerchantAvailabilityConfirmation,
             variants: variants || [],
             optionGroups: optionGroups || [],
           },

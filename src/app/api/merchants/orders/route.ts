@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import prisma from '@/lib/prisma';
 import { getUserFromSession } from '@/lib/user';
 import { createAuditLog } from '@/lib/audit-log';
+import { validateBorrowerEligibility } from '@/actions/borrower-validation';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -159,6 +160,21 @@ export async function PUT(req: NextRequest) {
     // Prevent cancelling delivered orders
     if (status === 'CANCELLED' && order.status === 'DELIVERED') {
       return NextResponse.json({ error: 'Cannot cancel a delivered order' }, { status: 400 });
+    }
+
+    // Enforce eligibility check before approving/completing BNPL order
+    if (status === 'ON_DELIVERY' || status === 'DELIVERED') {
+      const eligibility = await validateBorrowerEligibility(order.borrowerId, user.id, {
+        excludeOrderId: order.id,
+        excludeLoanId: order.loanId || undefined,
+        includePending: false // Allow confirmation even if other orders are still PENDING_MERCHANT_CONFIRMATION
+      });
+      if (!eligibility.isEligible) {
+        return NextResponse.json({ 
+          error: `Order update blocked: ${eligibility.reason}`,
+          details: eligibility.activeFinancing 
+        }, { status: 403 });
+      }
     }
 
     const updateData: any = { status };

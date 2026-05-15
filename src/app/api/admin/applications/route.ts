@@ -9,6 +9,7 @@ import { getUserFromSession } from '@/lib/user';
 import { loanCreationSchema } from '@/lib/schemas';
 import { addDays } from 'date-fns';
 import { areDisbursementsEnabled } from '@/lib/disbursement-control';
+import { validateBorrowerEligibility } from '@/actions/borrower-validation';
 
 // This is an internal helper function and should not be exported from the route file.
 // It is moved here because it's only used by this route.
@@ -257,6 +258,15 @@ export async function PUT(req: NextRequest) {
             if (!enabled) {
                 return NextResponse.json({ error: 'Disbursements are currently disabled.' }, { status: 503 });
             }
+
+            // Enforce eligibility check before admin approval/disbursement
+            const eligibility = await validateBorrowerEligibility(application.borrowerId, user.id);
+            if (!eligibility.isEligible) {
+                return NextResponse.json({ 
+                    error: `Disbursement blocked: ${eligibility.reason}`,
+                    details: eligibility.activeFinancing 
+                }, { status: 403 });
+            }
             
             const disbursementDate = new Date();
             const loanData = {
@@ -265,7 +275,7 @@ export async function PUT(req: NextRequest) {
                 loanApplicationId: application.id,
                 loanAmount: application.loanAmount!,
                 disbursedDate: disbursementDate.toISOString(),
-                dueDate: addDays(disbursedDate, application.product.duration || 30).toISOString(),
+                dueDate: addDays(disbursementDate, application.product.duration || 30).toISOString(),
             };
 
             const newLoan = await handleSmeLoan(loanData);

@@ -11,7 +11,8 @@ import prisma from '@/lib/prisma';
 import { getSalaryEntryForProduct, computeAllowedFromSalary } from '@/lib/salary-advance';
 import { evaluateCondition } from '@/lib/utils';
 import type { ScoringParameter as ScoringParameterType } from '@/lib/types';
-import { Loan, LoanProduct, Prisma, RepaymentBehavior } from '@prisma/client';
+import { Loan, LoanProduct, Prisma } from '@prisma/client';
+import { validateBorrowerEligibility } from '@/actions/borrower-validation';
 
 
 // Helper to convert strings to camelCase
@@ -210,17 +211,20 @@ async function calculateScoreForProvider(
 
 export async function checkLoanEligibility(borrowerId: string, providerId: string, productId: string): Promise<{isEligible: boolean; reason: string; score: number, maxLoanAmount: number}> {
   try {
+    // Centralized eligibility check
+    const centralizedEligibility = await validateBorrowerEligibility(borrowerId);
+    if (!centralizedEligibility.isEligible) {
+      return { 
+        isEligible: false, 
+        reason: centralizedEligibility.reason || 'Not eligible for financing.', 
+        score: 0, 
+        maxLoanAmount: 0 
+      };
+    }
+
     const borrower = await prisma.borrower.findUnique({
         where: { id: borrowerId }
     });
-
-    if (!borrower) {
-      return { isEligible: false, reason: 'Borrower profile not found.', score: 0, maxLoanAmount: 0 };
-    }
-
-    if (borrower.status === 'NPL') {
-        return { isEligible: false, reason: 'Your account is currently restricted due to a non-performing loan. Please contact support.', score: 0, maxLoanAmount: 0 };
-    }
     
     const product = await prisma.loanProduct.findUnique({ 
         where: { id: productId },

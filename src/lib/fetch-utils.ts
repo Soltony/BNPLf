@@ -1,22 +1,30 @@
 export async function extractErrorMessage(response: Response, defaultMsg: string) {
-  if (response.status === 401) return 'You must be signed in to perform this action. Please sign in and try again.';
-  if (response.status === 403) return 'Not authorized to perform this action.';
+  let extractedError: string | null = null;
 
   try {
     const data = await response.json();
-    if (data && data.error) return typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
-    return JSON.stringify(data);
+    if (data && data.error) {
+      extractedError = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
+    } else {
+      extractedError = JSON.stringify(data);
+    }
   } catch (e) {
     try {
       const text = await response.text();
       if (text) {
         const stripped = text.replace(/<[^>]*>/g, '');
-        return stripped.length > 200 ? stripped.substring(0, 200) + '...' : stripped;
+        extractedError = stripped.length > 200 ? stripped.substring(0, 200) + '...' : stripped;
       }
     } catch (_e) {
       // ignore
     }
   }
+
+  if (extractedError) return extractedError;
+
+  if (response.status === 401) return 'You must be signed in to perform this action. Please sign in and try again.';
+  if (response.status === 403) return 'Not authorized to perform this action.';
+
   return defaultMsg;
 }
 

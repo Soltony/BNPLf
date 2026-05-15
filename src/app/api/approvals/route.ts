@@ -13,7 +13,6 @@ import { normalizeDiscountEndDate, normalizeDiscountStartDate } from "@/lib/disc
 import { calculateTotalRepayable } from "@/lib/loan-calculator";
 import { startOfDay, isBefore, isEqual } from "date-fns";
 import { getAsOfDate } from "@/lib/date-utils";
-import type { RepaymentBehavior } from "@prisma/client";
 
 const approvalSchema = z.object({
   changeId: z.string(),
@@ -1528,42 +1527,131 @@ async function applyChange(
             videoUrl: updateFields.videoUrl,
             status: updateFields.status,
             sellingOption: updateFields.sellingOption,
+            requiresMerchantAvailabilityConfirmation: !!updateFields.requiresMerchantAvailabilityConfirmation,
           },
         });
-        // Replace option groups if provided
+        // Safe Sync for Option Groups and Values
         if (optionGroups) {
-          await prisma.itemOptionGroup.deleteMany({ where: { itemId: entityId } });
+          const currentGroups = await prisma.itemOptionGroup.findMany({
+            where: { itemId: entityId },
+            include: { values: true },
+          });
+
+          const incomingGroupNames = optionGroups.map((g: any) => g.name);
+
+          // 1. Update or Create Groups
           for (const g of optionGroups) {
             if (!g.name) continue;
-            await prisma.itemOptionGroup.create({
-              data: {
-                itemId: entityId as string,
-                name: g.name,
-                values: g.values?.length ? {
-                  create: g.values.map((v: any) => ({
-                    label: v.label,
-                    priceDelta: parseFloat(v.priceDelta || '0'),
-                  })),
-                } : undefined,
-              },
-            });
+            const existingGroup = currentGroups.find(cg => cg.name === g.name);
+
+            if (existingGroup) {
+              // Sync values for existing group
+              const currentValues = existingGroup.values;
+              const incomingValues = g.values || [];
+              const incomingValueLabels = incomingValues.map((v: any) => v.label);
+
+              for (const iv of incomingValues) {
+                const existingValue = currentValues.find(cv => cv.label === iv.label);
+                if (existingValue) {
+                  await prisma.itemOptionValue.update({
+                    where: { id: existingValue.id },
+                    data: { priceDelta: parseFloat(iv.priceDelta || '0') },
+                  });
+                } else {
+                  await prisma.itemOptionValue.create({
+                    data: {
+                      groupId: existingGroup.id,
+                      label: iv.label,
+                      priceDelta: parseFloat(iv.priceDelta || '0'),
+                    },
+                  });
+                }
+              }
+
+              // Delete removed values if not in use
+              for (const cv of currentValues) {
+                if (!incomingValueLabels.includes(cv.label)) {
+                  const inUse = await prisma.orderItemOptionSelection.findFirst({
+                    where: { optionValueId: cv.id },
+                  });
+                  if (!inUse) {
+                    await prisma.itemOptionValue.delete({ where: { id: cv.id } }).catch(() => {});
+                  }
+                }
+              }
+            } else {
+              // Create new group
+              await prisma.itemOptionGroup.create({
+                data: {
+                  itemId: entityId as string,
+                  name: g.name,
+                  values: g.values?.length ? {
+                    create: g.values.map((v: any) => ({
+                      label: v.label,
+                      priceDelta: parseFloat(v.priceDelta || '0'),
+                    })),
+                  } : undefined,
+                },
+              });
+            }
+          }
+
+          // 2. Delete removed groups if not in use
+          for (const cg of currentGroups) {
+            if (!incomingGroupNames.includes(cg.name)) {
+              const inUse = await prisma.orderItemOptionSelection.findFirst({
+                where: { optionValue: { groupId: cg.id } },
+              });
+              if (!inUse) {
+                await prisma.itemOptionGroup.delete({ where: { id: cg.id } }).catch(() => {});
+              }
+            }
           }
         }
-        // Replace variants if provided
+
+        // Safe Sync for Variants
         if (variants) {
-          await prisma.itemVariant.deleteMany({ where: { itemId: entityId } });
-          if (variants.length > 0) {
-            await prisma.itemVariant.createMany({
-              data: variants.map((v: any) => ({
-                itemId: entityId as string,
-                name: v.name,
-                size: v.size || null,
-                color: v.color || null,
-                material: v.material || null,
-                price: parseFloat(v.price),
-                status: v.status || 'ACTIVE',
-              })),
-            });
+          const currentVariants = await prisma.itemVariant.findMany({
+            where: { itemId: entityId },
+          });
+
+          const incomingVariantNames = variants.map((v: any) => v.name);
+
+          for (const v of variants) {
+            const existingVariant = currentVariants.find(cv => cv.name === v.name);
+            const variantData = {
+              itemId: entityId as string,
+              name: v.name,
+              size: v.size || null,
+              color: v.color || null,
+              material: v.material || null,
+              price: parseFloat(v.price),
+              status: v.status || 'ACTIVE',
+            };
+
+            if (existingVariant) {
+              await prisma.itemVariant.update({
+                where: { id: existingVariant.id },
+                data: variantData,
+              });
+            } else {
+              await prisma.itemVariant.create({
+                data: variantData,
+              });
+            }
+          }
+
+          // Delete removed variants if not in use
+          // Note: Variants might be referenced by OrderItem.variantId
+          for (const cv of currentVariants) {
+            if (!incomingVariantNames.includes(cv.name)) {
+              const inUse = await prisma.orderItem.findFirst({
+                where: { variantId: cv.id },
+              });
+              if (!inUse) {
+                await prisma.itemVariant.delete({ where: { id: cv.id } }).catch(() => {});
+              }
+            }
           }
         }
       } else if (changeType === "DELETE") {

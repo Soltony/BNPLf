@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { z } from 'zod';
 import { getSession } from '@/lib/session';
+import { validateBorrowerEligibility } from '@/actions/borrower-validation';
+import { getUserFromSession } from '@/lib/user';
 
 const applicationSchema = z.object({
   borrowerId: z.string(),
@@ -30,6 +32,16 @@ export async function POST(req: NextRequest) {
         
         if (!borrower) {
             return NextResponse.json({ error: 'Borrower not found' }, { status: 404 });
+        }
+
+        // Enforce eligibility check before creating standard loan application
+        const user = await getUserFromSession();
+        const eligibility = await validateBorrowerEligibility(borrowerId, user?.id);
+        if (!eligibility.isEligible) {
+            return NextResponse.json({ 
+                error: eligibility.reason,
+                details: eligibility.activeFinancing 
+            }, { status: 403 });
         }
 
         // If no reusable application is found, create a new one.
