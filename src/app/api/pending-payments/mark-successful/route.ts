@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
         select: {
           id: true,
           loanAmount: true,
-          status: true,
+          repaymentStatus: true,
           borrowerId: true,
           product: {
             select: {
@@ -68,8 +68,6 @@ export async function POST(req: NextRequest) {
       borrower: {
         select: {
           id: true,
-          phoneNumber: true,
-          phoneAccounts: { select: { accountNumber: true }, take: 1 },
         },
       },
     },
@@ -122,9 +120,15 @@ export async function POST(req: NextRequest) {
           providerName: pendingPayment.loan.product.provider.name,
           providerId: pendingPayment.loan.product.provider.id,
           productName: pendingPayment.loan.product.name,
-          borrowerPhone: pendingPayment.borrower.phoneNumber,
+          borrowerPhone: pendingPayment.borrowerId,
           accountNumber:
-            pendingPayment.borrower.phoneAccounts?.[0]?.accountNumber || null,
+            (
+              await prisma.phoneAccount.findFirst({
+                where: { phoneNumber: pendingPayment.borrowerId },
+                orderBy: [{ isActive: "desc" }, { createdAt: "asc" }],
+                select: { accountNumber: true },
+              })
+            )?.accountNumber ?? null,
         },
       }),
       createdById: user.id,

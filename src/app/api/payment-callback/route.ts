@@ -140,11 +140,24 @@ export async function POST(request: NextRequest) {
     Signature: receivedSignature,
   } = requestBody;
 
+  // --- Determine payment type: BNPL or DIRECT ---
+  // Check both PendingPayment (BNPL) and DirectPendingPayment (DIRECT) by txnRef
+  let paymentType: "BNPL" | "DIRECT" = "BNPL";
+  const bnplPending = await prisma.pendingPayment.findUnique({
+    where: { transactionId: txnRef },
+  });
+  const directPending = !bnplPending
+    ? await (prisma as any).directPendingPayment.findUnique({
+        where: { transactionId: txnRef },
+      })
+    : null;
+
+  if (directPending) {
+    paymentType = "DIRECT";
+  }
+
   // --- Log payment transaction ---
   try {
-    // Try to find an existing PaymentTransaction by either payload.transactionId
-    // (the upstream's id) or by txnRef. If found, update that record and
-    // ensure both columns are populated; otherwise create a new row.
     const existing = await prisma.paymentTransaction.findFirst({
       where: {
         OR: [
@@ -161,6 +174,7 @@ export async function POST(request: NextRequest) {
         data: {
           status: "RECEIVED",
           payload: JSON.stringify(requestBody),
+          paymentType,
           transactionId: transactionId || existingAny.transactionId,
           txnRef: txnRef || existingAny.txnRef,
         } as any,
@@ -170,6 +184,7 @@ export async function POST(request: NextRequest) {
         data: {
           transactionId: transactionId || txnRef,
           txnRef: txnRef,
+          paymentType,
           status: "RECEIVED",
           payload: JSON.stringify(requestBody),
         } as any,
@@ -179,12 +194,75 @@ export async function POST(request: NextRequest) {
     console.error("Failed to log payment transaction:", e);
   }
 
-  // Step 3: Process payment
+  // --- Route to DIRECT payment handler ---
+  if (paymentType === "DIRECT" && directPending) {
+    try {
+      if (directPending.status === "COMPLETED") {
+        return NextResponse.json(
+          { message: "Payment already processed." },
+          { status: 200 }
+        );
+      }
+
+      const { orderId, borrowerId, merchantId, amount: expectedAmount } = directPending;
+
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+      if (!order) {
+        throw new Error(`Order ${orderId} not found.`);
+      }
+
+      if (order.status === "ON_DELIVERY" || order.status === "PENDING_MERCHANT_CONFIRMATION") {
+        await prisma.order.update({
+          where: { id: orderId },
+          data: { status: "DELIVERED" },
+        });
+      }
+
+      await (prisma as any).directPendingPayment.update({
+        where: { transactionId: txnRef },
+        data: { status: "COMPLETED" },
+      });
+
+      await prisma.paymentTransaction.updateMany({
+        where: {
+          OR: [
+            transactionId ? { transactionId } : undefined,
+            txnRef ? { txnRef } : undefined,
+          ].filter(Boolean) as any,
+        },
+        data: { status: "PROCESSED" } as any,
+      });
+
+      await createAuditLog({
+        actorId: borrowerId,
+        action: "DIRECT_PAYMENT_SUCCESS",
+        entity: "ORDER",
+        entityId: orderId,
+        details: {
+          transactionId,
+          txnRef,
+          paidAmount,
+          merchantId,
+          expectedAmount,
+        },
+      });
+
+      return NextResponse.json(
+        { message: "Direct payment processed successfully." },
+        { status: 200 }
+      );
+    } catch (e: any) {
+      console.error("Direct Payment Callback processing error:", e);
+      return NextResponse.json(
+        { message: e.message || "Internal processing error." },
+        { status: 500 }
+      );
+    }
+  }
+
+  // --- Route to BNPL payment handler ---
   try {
-    const pendingPayment = await prisma.pendingPayment.findUnique({
-      where: { transactionId: txnRef },
-    });
-    if (!pendingPayment) {
+    if (!bnplPending) {
       console.error(
         `Callback Error: No pending payment found for txnRef: ${txnRef}`
       );
@@ -194,6 +272,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const pendingPayment = bnplPending;
     const { loanId, amount: paymentAmount, borrowerId } = pendingPayment;
 
     const [loan, taxConfigs] = await Promise.all([

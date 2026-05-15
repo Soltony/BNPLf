@@ -53,7 +53,7 @@ type PendingPaymentRow = {
   loan: {
     id: string;
     loanAmount: number;
-    status: string;
+    repaymentStatus: string;
     borrowerId: string;
     product: {
       name: string;

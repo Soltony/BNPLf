@@ -31,7 +31,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Derive the direct-payment callback from the existing CALLBACK_URL base
-    const DIRECT_CALLBACK_URL = CALLBACK_URL.replace(/\/api\/payment-callback\/?$/, '/api/direct-payment/callback');
+    // NOTE: Using the same CALLBACK_URL for all payment types.
+    // The unified /api/payment-callback handler differentiates by looking up
+    // the txnRef in both PendingPayment (BNPL) and DirectPendingPayment (DIRECT).
+    const DIRECT_CALLBACK_URL = CALLBACK_URL;
 
     try {
         const ipAddress = req.headers.get('x-forwarded-for') || 'N/A';
