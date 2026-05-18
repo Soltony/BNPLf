@@ -32,11 +32,21 @@ export async function GET(req: NextRequest) {
   }
 
   if (search) {
+    const accountMatches = await prisma.phoneAccount.findMany({
+      where: { accountNumber: { contains: search } },
+      select: { phoneNumber: true },
+      take: 50,
+    });
+    const phoneNumbersFromAccounts = [
+      ...new Set(accountMatches.map((a) => a.phoneNumber)),
+    ];
     where.OR = [
       { transactionId: { contains: search } },
       { loanId: { contains: search } },
       { borrowerId: { contains: search } },
-      { borrower: { phoneNumber: { contains: search } } },
+      ...(phoneNumbersFromAccounts.length
+        ? [{ borrowerId: { in: phoneNumbersFromAccounts } }]
+        : []),
     ];
   }
 
@@ -48,7 +58,7 @@ export async function GET(req: NextRequest) {
           select: {
             id: true,
             loanAmount: true,
-            status: true,
+            repaymentStatus: true,
             borrowerId: true,
             product: {
               select: {
@@ -61,8 +71,6 @@ export async function GET(req: NextRequest) {
         borrower: {
           select: {
             id: true,
-            phoneNumber: true,
-            phoneAccounts: { select: { accountNumber: true }, take: 1 },
           },
         },
       },
@@ -90,8 +98,32 @@ export async function GET(req: NextRequest) {
     existingApprovals.map((a) => [a.entityId, a])
   );
 
+  const borrowerIds = [...new Set(rows.map((r) => r.borrowerId))];
+  const phoneAccounts = borrowerIds.length
+    ? await prisma.phoneAccount.findMany({
+        where: { phoneNumber: { in: borrowerIds } },
+        select: { phoneNumber: true, accountNumber: true, isActive: true },
+        orderBy: [{ isActive: "desc" }, { createdAt: "asc" }],
+      })
+    : [];
+  const accountByBorrower = new Map<string, { accountNumber: string }>();
+  for (const account of phoneAccounts) {
+    if (!accountByBorrower.has(account.phoneNumber)) {
+      accountByBorrower.set(account.phoneNumber, {
+        accountNumber: account.accountNumber,
+      });
+    }
+  }
+
   const enrichedRows = rows.map((r) => ({
     ...r,
+    borrower: {
+      ...r.borrower,
+      phoneNumber: r.borrowerId,
+      phoneAccounts: accountByBorrower.has(r.borrowerId)
+        ? [accountByBorrower.get(r.borrowerId)!]
+        : [],
+    },
     pendingApproval: approvalMap.get(r.id) || null,
   }));
 
